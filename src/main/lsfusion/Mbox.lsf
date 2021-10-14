@@ -1,0 +1,107 @@
+MODULE Mbox;
+
+REQUIRE Config;
+
+NAMESPACE Observer;
+
+CLASS Mbox 'MBOX files';
+TABLE mbox(Mbox);
+
+filename 'File Name' = DATA STRING (Mbox) CHARWIDTH 50;
+path 'Storage containing the MBOX File' = DATA STRING (Mbox);
+filelink 'Link to MBOX File' (Mbox v) = CONCAT '/', path(v), filename(v) MATERIALIZED CHARWIDTH 100; // pathbuilder hardcoded for linux servers
+
+// Filename parsing at upload
+filenameExt 'Extension at upload' = DATA STRING (Mbox) CHARWIDTH 5;
+filenameArch 'File Name after import' = DATA STRING (Mbox) CHARWIDTH 50;
+filelinkOut 'File Name without extension' (Mbox v) = CONCAT '/', archPath(), filenameArch(v) CHARWIDTH 100;
+
+// Flags for MBOX importing sequencing
+toImport 'Need to be imported from MBOX format' = DATA BOOLEAN (Mbox);
+isImported 'Imported from MBOX format' = DATA BOOLEAN (Mbox);
+wrongFormat 'Wrong file format' = DATA BOOLEAN (Mbox);
+
+// Aggregating flag
+numberToImport 'MBOX archives at import' = GROUP SUM 1 IF toImport(Mbox v) AND NOT isImported(v);
+
+// Keep MBOX record, if was not able to delete file from server
+isHidden 'Keep files until removal from storage' = DATA BOOLEAN (Mbox);
+
+// Uniqueness check for the MBOX archives by its filenames
+mbox = GROUP AGGR Mbox v BY filename(v);
+
+WHEN SET (isImported(Mbox v)) DO {
+    IF NOT toImport(v) THEN RETURN;
+    fileExists(filelinkOut(v));
+    IF fileExists() THEN {
+        TRY {
+            delete(filelink(v));
+        }
+        CATCH {
+            MESSAGE 'Cannot delete file ' + filelink(v) + ':\n' + messageCaughtException();
+        }
+        fileExists(filelink(v));
+        IF NOT fileExists() THEN {
+            path(v) <- archPath();
+            filename(v) <- filenameArch(v);
+        }
+        toImport(v) <- NULL;
+        isImported(v) <- TRUE;
+    }
+    ELSE {
+        // Accumulate files with errors
+        isImported(v) <- NULL;
+        toImport(v) <- NULL;
+    }
+}
+
+// Files upload
+checkManual 'Check for new manually uploaded files' () {
+    TRY {
+        checkDirectory(path(Storage.import));
+        NEWSESSION {
+            LOCAL counter = INTEGER();
+            LOCAL counterImport = INTEGER();
+            LOCAL absolutePath = STRING();
+            LOCAL targetExtension = STRING();
+            LOCAL filenameWithoutExtension = STRING();
+            counter() <- 0;
+            counterImport() <- 0;
+            
+            targetExtension() <- '.mbox';
+            
+            listFiles(manualPath());
+            FOR fileName(INTEGER r) AND NOT mbox(fileName(r)) AND NOT fileIsDirectory(r) NEW v = Mbox DO {
+                filename(v) <- fileName(r);
+                // Regular Expressions in LSFusion require masking of the symbol \
+                filenameWithoutExtension() <- regexpReplace(filename(v),'\\.[^\\.]*$','','');
+                // Extract extension of the uploaded file
+                filenameExt(v) <- replace(filename(v),filenameWithoutExtension(),'');
+                IF filenameExt(v) != targetExtension() THEN {
+                    path(v) <- archPath();
+                    wrongFormat(v) <- TRUE;
+                }
+                ELSE {
+                    path(v) <- convertPath();
+                    filenameArch(v) <- filenameWithoutExtension() + targetExtension();
+                    toImport(v) <- TRUE;
+                    counterImport() <- counterImport() + 1;
+                }
+                move((CONCAT '/', manualPath(), filename(v)), filelink(v));
+                counter() <- counter() + 1;
+            }
+            IF counter() > 0 THEN
+                MESSAGE 'Successfully added ' + counter() + ' new files.\nFiles to be converted: ' + counterImport() + ' put into queue.';
+            ELSE 
+                MESSAGE 'No new manualy uploaded files found';
+            APPLY;
+        }
+    }
+    CATCH {
+        MESSAGE 'Cannot read the storage for manualy uploaded files:\n' + messageCaughtException();
+    }
+}
+
+uploadFile 'Upload a new MBOX file' () {
+    // ToDo Upload MBOX via GUI
+}

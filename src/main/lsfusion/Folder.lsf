@@ -1,0 +1,83 @@
+MODULE Folder;
+
+REQUIRE Mbox;
+
+NAMESPACE Observer; 
+
+CLASS Folder 'Folder';
+TABLE folder(Folder);
+
+dateTime 'Created' = DATA DATETIME (Folder) CHARWIDTH 20;
+name 'Name' = DATA STRING[200] (Folder) NONULL;
+
+folder 'Folder' = GROUP AGGR Folder p BY name(p);
+
+// Inserting data from MBOX archives into Folder
+in 'in' = DATA BOOLEAN (Folder,Mbox) CHARWIDTH 3;
+
+deleteFile 'Delete file' (Mbox v) {
+    NEWSESSION {
+        FOR in(Folder p,v) DO 
+            in(p,v) <- NULL;
+        isHidden(v) <- TRUE;
+        TRY {
+            delete(filelink(v));
+            DELETE (v);
+        }
+        CATCH {
+            MESSAGE 'Cannot delete file\n' + filelink(v) + '\nfrom the server:\n' + messageCaughtException();
+        }
+        APPLY;
+    }
+} CHARWIDTH 12;
+
+// Forms
+showDelete 'Show deletion button' = DATA LOCAL BOOLEAN ();
+
+FORM folder 'Edit Folder'
+    OBJECTS p = Folder PANEL 
+    PROPERTIES (p) name
+    
+    OBJECTS v = Mbox
+    PROPERTIES(p,v) in
+    PROPERTIES (v) READONLY filename, toImport, isImported, wrongFormat
+    PROPERTIES TOOLBAR DRAW v checkManual(), deleteFile(v) GRID SHOWIF showDelete() // not implemented: uploadFile(), 
+    FILTERS NOT isHidden(v)
+    FILTERGROUP mboxs
+        FILTER 'Show files in MBOX format only' NOT wrongFormat(v) DEFAULT
+    
+    PROPERTIES showDelete()
+    EDIT Folder OBJECT p
+;
+
+DESIGN folder { 
+    NEW pane FIRST {
+        alignment = STRETCH;
+        fill = 1;
+        MOVE PROPERTY(name(p)) {alignment = STRETCH;} 
+        NEW mboxs {
+            type = CONTAINERH;
+            fill = 1;
+            MOVE BOX (v) {alignment = STRETCH; fill = 1; }
+        }
+    }
+    TOOLBAR {
+        MOVE PROPERTY (showDelete());
+    }
+}
+
+FORM folders 'Folders'
+    OBJECTS p = Folder
+    PROPERTIES (p) READONLY dateTime, name
+    PROPERTIES (p) NEWSESSION NEW , EDIT , DELETE 
+    
+    OBJECTS v = Mbox
+    PROPERTIES(p,v) order
+    PROPERTIES (v) READONLY filename
+    FILTERS in(p,v) AND NOT isHidden(v)
+    ORDERS order(p,v)
+;
+
+NAVIGATOR {
+    NEW folders FIRST;
+}

@@ -1,0 +1,51 @@
+MODULE Runner;
+
+REQUIRE Mbox;
+
+NAMESPACE Observer;
+
+// Block for single import process running
+isBlocked 'Import process is busy' () = DATA BOOLEAN ();
+
+// Import data from MBOX format
+importMbox 'Import data from MBOX archive' ABSTRACT LIST (Mbox v);
+
+// Runner for MBOX import Scheduler
+importNextFile 'Import from next MBOX archive' () {
+    LOCAL nextFile = Mbox(); 
+    nextFile() <- GROUP LAST Mbox v IF toImport(v) AND NOT isImported(v);
+    
+    IF NOT nextFile() THEN RETURN;
+    
+    IF NOT filelink(nextFile()) OR NOT filelinkOut(nextFile()) THEN {
+        printToLog('Cannot import from MBOX archive, because some of links empty: ' + (OVERRIDE filelink(nextFile()),filelinkOut(nextFile()),filename(nextFile()),'unknown'));
+        toImport(nextFile()) <- NULL;
+        RETURN;
+    }
+    
+    IF isBlocked() THEN {
+        printToLog('Import is blocked by another process');
+        RETURN;
+    }
+    printToLog('Start importing from MBOX archive: ' + filename(nextFile()));
+    NEWSESSION { 
+        isBlocked() <- TRUE; 
+        APPLY; 
+    }
+    
+    importMbox(nextFile());
+    
+    printToLog('Stop importing from MBOX archive: ' + filename(nextFile()));
+    isBlocked() <- NULL;
+    APPLY;
+}
+
+// Process monitor
+EXTEND FORM parameters PROPERTIES numberToImport(), isBlocked();
+DESIGN parameters { pane { 
+    NEW process {
+        caption = 'Process monitor';
+        MOVE PROPERTY (numberToImport()); 
+        MOVE PROPERTY (isBlocked());
+    }
+}}

@@ -1,0 +1,69 @@
+MODULE Config;
+
+REQUIRE MasterData, Utils, Time;
+
+NAMESPACE Observer;
+
+localStorage 'Absolute path to local storage of Mbox files' = DATA STRING ();
+
+CLASS Storage 'Storage for Mbox Files'
+{
+    auto 'auto',    // auto upload
+    manual 'manual', // manual upload
+    import 'import', // files to be imported
+    arch 'arch' // storage of imported files
+}
+TABLE folder(Storage);
+
+type 'Type' (Storage f) = staticCaption(f) CHARWIDTH 10;
+pathSet 'Path on local storage' = DATA STRING (Storage);
+path 'Path on local storage' (Storage f) = OVERRIDE pathSet(f),type(f);
+autoPath 'Path to auto uploads' = CONCAT '/', localStorage(), path(Storage.auto);
+manualPath 'Path to auto uploads' = CONCAT '/', localStorage(), path(Storage.manual);
+importPath 'Path to files to be imported' = CONCAT '/', localStorage(), path(Storage.import);
+archPath 'Path to storage of imported files' = CONCAT '/', localStorage(), path(Storage.arch);
+
+checkDirectory (STRING dir) {
+    LOCAL pathDir = STRING ();
+    pathDir() <- CONCAT '/', localStorage(), dir;
+    fileExists(pathDir());
+    IF NOT fileExists() THEN
+        mkdir(pathDir());
+}
+
+// Forms
+
+FORM folder 'Edit local folder'
+    OBJECTS p = Storage PANEL 
+    PROPERTIES (p) pathSet
+    
+    EDIT Storage OBJECT p
+;
+
+FORM parameters 'Parameters'
+    PROPERTIES PANEL localStorage()
+
+    OBJECTS f = Storage
+    PROPERTIES (f) READONLY type, path
+    PROPERTIES (f) NEWSESSION EDIT
+;
+
+DESIGN parameters {
+    NEW pane FIRST {
+        fill = 1;
+        alignment = STRETCH;
+        type = CONTAINERV;
+        MOVE PROPERTY (localStorage()) { alignment = STRETCH; }
+        MOVE BOX (f)
+        {
+            GRID(f) { autoSize = TRUE; }
+            flex = 0;
+        }
+    } 
+}
+
+NAVIGATOR {
+    masterData {
+        NEW parameters FIRST;
+    }
+}
