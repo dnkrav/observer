@@ -13,7 +13,7 @@ CLASS Storage 'Storage for Mbox Files'
     import 'import', // files to be imported
     arch 'arch' // storage of imported files
 }
-TABLE folder(Storage);
+TABLE storage(Storage);
 
 type 'Type' (Storage f) = staticCaption(f) CHARWIDTH 10;
 pathSet 'Path on local storage' = DATA STRING (Storage);
@@ -33,7 +33,7 @@ checkDirectory (STRING dir) {
 
 // Forms
 
-FORM folder 'Edit local folder'
+FORM storage 'Edit local storage'
     OBJECTS p = Storage PANEL 
     PROPERTIES (p) pathSet
     

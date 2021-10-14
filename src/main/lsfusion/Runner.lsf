@@ -8,12 +8,14 @@ NAMESPACE Observer;
 isBlocked 'Import process is busy' () = DATA BOOLEAN ();
 
 // Import data from MBOX format
-importMbox 'Import data from MBOX archive' ABSTRACT LIST (Mbox v);
+importMbox 'Import data from MBOX archive' (Mbox v) {
+    // @ToDo Import data from MBOX archive
+};
 
 // Runner for MBOX import Scheduler
 importNextFile 'Import from next MBOX archive' () {
     LOCAL nextFile = Mbox(); 
-    nextFile() <- GROUP LAST Mbox v IF toImport(v) AND NOT isImported(v);
+    nextFile() <- GROUP LAST Mbox v IF toImport(v) AND NOT isImported(v) ORDER filename(v);
     
     IF NOT nextFile() THEN RETURN;
     

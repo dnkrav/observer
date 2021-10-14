@@ -72,10 +72,10 @@ FORM folders 'Folders'
     PROPERTIES (p) NEWSESSION NEW , EDIT , DELETE 
     
     OBJECTS v = Mbox
-    PROPERTIES(p,v) order
+    PROPERTIES(p,v) in
     PROPERTIES (v) READONLY filename
     FILTERS in(p,v) AND NOT isHidden(v)
-    ORDERS order(p,v)
+    ORDERS filename(v)
 ;
 
 NAVIGATOR {

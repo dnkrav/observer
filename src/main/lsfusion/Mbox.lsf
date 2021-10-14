@@ -82,7 +82,7 @@ checkManual 'Check for new manually uploaded files' () {
                     wrongFormat(v) <- TRUE;
                 }
                 ELSE {
-                    path(v) <- convertPath();
+                    path(v) <- importPath();
                     filenameArch(v) <- filenameWithoutExtension() + targetExtension();
                     toImport(v) <- TRUE;
                     counterImport() <- counterImport() + 1;
