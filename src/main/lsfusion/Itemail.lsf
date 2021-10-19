@@ -1,0 +1,62 @@
+MODULE Itemail;
+
+REQUIRE Mbox;
+
+NAMESPACE Observer;
+
+CLASS Itemail 'Item Email';
+TABLE itemail(Itemail);
+
+// Container for items from the mbox archive
+// https://www.loc.gov/preservation/digital/formats/fdd/fdd000383.shtml
+// RFC 4155: The application/mbox Media Type Standard
+// https://datatracker.ietf.org/doc/html/rfc4155
+mbox 'Source MBOX' = DATA Mbox(Itemail);
+messages 'Imported Messages' = GROUP SUM 1 BY mbox(Itemail m);
+messages 'Messages' = GROUP SUM 1 BY account(mbox(Itemail m));
+
+// The From_ line of the message
+// http://qmail.org/qmail-manual-html/man5/mbox.html
+envsender 'Envelope Sender' = DATA STRING (Itemail);
+timestamp 'UTC timestamp Received' = DATA STRING[30] (Itemail);
+datetime 'Date/Time Received' = DATA DATETIME (Itemail);
+message 'Entire Message' = DATA TEXT (Itemail);
+
+// Headers
+from 'From' = DATA STRING (Itemail);
+dateFrom 'Date' = DATA STRING (Itemail);
+subject 'Subject' = DATA STRING (Itemail);
+to 'To' = DATA STRING (Itemail);
+cc 'Cc' = DATA STRING (Itemail);
+
+// Properties
+contentType 'Content-Type' = DATA STRING (Itemail);
+
+// Identifiers
+messageID 'Message-ID' = DATA STRING (Itemail);
+boundary 'Boundary between parts' = DATA STRING (Itemail);
+
+// The envelope From string is a unique identifier of the Email
+envelope = GROUP AGGR Itemail v BY account(mbox(v)), envsender(v);
+
+// Forms
+
+EXTEND FORM folders
+    PROPERTIES (a) messages
+    PROPERTIES (v) messages
+
+    OBJECTS m = Itemail
+    PROPERTIES (m) READONLY envsender, timestamp, message PANEL 
+    PROPERTIES (m) DELETE GRID 
+    FILTERS mbox(m) == v 
+;
+
+DESIGN folders { pane {
+    NEW itemail {
+        type = CONTAINERV;
+        alignment = STRETCH;
+        fill = 2;
+        MOVE BOX (m) {alignment = STRETCH; fill = 1;}
+        MOVE PROPERTY (message(m)) { alignment = STRETCH; fill = 2; panelCaptionVertical = TRUE; }
+    }
+} }

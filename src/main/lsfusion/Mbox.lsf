@@ -1,13 +1,16 @@
 MODULE Mbox;
 
-REQUIRE Config;
+REQUIRE Folder;
 
 NAMESPACE Observer;
 
 CLASS Mbox 'MBOX files';
 TABLE mbox(Mbox);
 
-filename 'File Name' = DATA STRING (Mbox) CHARWIDTH 50;
+account 'Folder' = DATA Account (Mbox);
+email 'Folder' (Mbox m) = email(account(m)) CHARWIDTH 30;
+
+filename 'File Name' = DATA STRING (Mbox) CHARWIDTH 30;
 path 'Storage containing the MBOX File' = DATA STRING (Mbox);
 filelink 'Link to MBOX File' (Mbox v) = CONCAT '/', path(v), filename(v) MATERIALIZED CHARWIDTH 100; // pathbuilder hardcoded for linux servers
 
@@ -20,6 +23,10 @@ filelinkOut 'File Name without extension' (Mbox v) = CONCAT '/', archPath(), fil
 toImport 'Need to be imported from MBOX format' = DATA BOOLEAN (Mbox);
 isImported 'Imported from MBOX format' = DATA BOOLEAN (Mbox);
 wrongFormat 'Wrong file format' = DATA BOOLEAN (Mbox);
+
+// Counters
+length 'Number of lines' = DATA LONG (Mbox);
+progress 'Imported lines' = DATA LONG (Mbox);
 
 // Aggregating flag
 numberToImport 'MBOX archives at import' = GROUP SUM 1 IF toImport(Mbox v) AND NOT isImported(v);
@@ -102,6 +109,71 @@ checkManual 'Check for new manually uploaded files' () {
     }
 }
 
+deleteFile 'Delete file' (Mbox v) {
+    NEWSESSION {
+        isHidden(v) <- TRUE;
+        TRY {
+            delete(filelink(v));
+            DELETE (v);
+        }
+        CATCH {
+            MESSAGE 'Cannot delete file\n' + filelink(v) + '\nfrom the server:\n' + messageCaughtException();
+        }
+        APPLY;
+    }
+} CHARWIDTH 12;
+
 uploadFile 'Upload a new MBOX file' () {
     // ToDo Upload MBOX via GUI
+}
+
+// Forms
+
+EXTEND FORM folder
+    OBJECTS v = Mbox
+    PROPERTIES email(v)
+    PROPERTIES (v) READONLY filename, toImport, isImported, wrongFormat, length, progress, isHidden
+    PROPERTIES TOOLBAR DRAW v checkManual(), deleteFile(v) GRID SHOWIF showDelete() // not implemented: uploadFile(), 
+    FILTERGROUP mboxs
+        FILTER 'Show files in MBOX format only' NOT wrongFormat(v) DEFAULT
+;
+
+DESIGN folder { pane {
+    NEW mbox {
+        type = CONTAINERV;
+        alignment = STRETCH;
+        fill = 1;
+        MOVE BOX (v) {alignment = STRETCH; fill = 1; }
+    }
+} }
+
+EXTEND FORM folders
+    OBJECTS v = Mbox
+    PROPERTIES (v) READONLY filename, length, progress
+    FILTERS account(v) == a AND NOT isHidden(v)
+    ORDERS filename(v)
+;
+
+DESIGN folders {
+    NEW pane FIRST {
+        type = CONTAINERH;
+        fill = 1;
+        alignment = STRETCH;
+        NEW accounts {
+            type = CONTAINERV;
+            alignment = STRETCH;
+            width = 500;
+            NEW folder {
+                type = CONTAINERV;
+                alignment = STRETCH;
+                height = 300;
+                MOVE BOX (p);
+            }
+            MOVE BOX (a);
+            MOVE BOX (v) {
+                GRID(v) { autoSize = TRUE; }
+                flex = 0;
+            }
+        }
+    }
 }

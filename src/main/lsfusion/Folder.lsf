@@ -1,6 +1,6 @@
 MODULE Folder;
 
-REQUIRE Mbox;
+REQUIRE Config;
 
 NAMESPACE Observer; 
 
@@ -12,24 +12,14 @@ name 'Name' = DATA STRING[200] (Folder) NONULL;
 
 folder 'Folder' = GROUP AGGR Folder p BY name(p);
 
-// Inserting data from MBOX archives into Folder
-in 'in' = DATA BOOLEAN (Folder,Mbox) CHARWIDTH 3;
+CLASS Account 'Account';
+TABLE account(Account);
 
-deleteFile 'Delete file' (Mbox v) {
-    NEWSESSION {
-        FOR in(Folder p,v) DO 
-            in(p,v) <- NULL;
-        isHidden(v) <- TRUE;
-        TRY {
-            delete(filelink(v));
-            DELETE (v);
-        }
-        CATCH {
-            MESSAGE 'Cannot delete file\n' + filelink(v) + '\nfrom the server:\n' + messageCaughtException();
-        }
-        APPLY;
-    }
-} CHARWIDTH 12;
+email 'Email' = DATA STRING (Account) CHARWIDTH 30 NONULL;
+folder 'Folder' = DATA Folder (Account);
+nameFolder 'Folder' (Account m) = name(folder(m)) CHARWIDTH 30;
+
+account 'Account' = GROUP AGGR Account p BY email(p);
 
 // Forms
 showDelete 'Show deletion button' = DATA LOCAL BOOLEAN ();
@@ -38,13 +28,9 @@ FORM folder 'Edit Folder'
     OBJECTS p = Folder PANEL 
     PROPERTIES (p) name
     
-    OBJECTS v = Mbox
-    PROPERTIES(p,v) in
-    PROPERTIES (v) READONLY filename, toImport, isImported, wrongFormat
-    PROPERTIES TOOLBAR DRAW v checkManual(), deleteFile(v) GRID SHOWIF showDelete() // not implemented: uploadFile(), 
-    FILTERS NOT isHidden(v)
-    FILTERGROUP mboxs
-        FILTER 'Show files in MBOX format only' NOT wrongFormat(v) DEFAULT
+    OBJECTS a = Account 
+    PROPERTIES (a) email, NEW , DELETE 
+    FILTERS folder(a) == p
     
     PROPERTIES showDelete()
     EDIT Folder OBJECT p
@@ -52,13 +38,15 @@ FORM folder 'Edit Folder'
 
 DESIGN folder { 
     NEW pane FIRST {
+        type = CONTAINERH;
         alignment = STRETCH;
         fill = 1;
-        MOVE PROPERTY(name(p)) {alignment = STRETCH;} 
-        NEW mboxs {
-            type = CONTAINERH;
-            fill = 1;
-            MOVE BOX (v) {alignment = STRETCH; fill = 1; }
+        NEW folder {
+            type = CONTAINERV;    
+            alignment = STRETCH;
+            width = 500;
+            MOVE PROPERTY(name(p)) {alignment = STRETCH; panelCaptionVertical = TRUE; } 
+            MOVE BOX (a) { alignment = STRETCH; fill = 1; }
         }
     }
     TOOLBAR {
@@ -68,14 +56,12 @@ DESIGN folder {
 
 FORM folders 'Folders'
     OBJECTS p = Folder
-    PROPERTIES (p) READONLY dateTime, name
+    PROPERTIES (p) READONLY name
     PROPERTIES (p) NEWSESSION NEW , EDIT , DELETE 
     
-    OBJECTS v = Mbox
-    PROPERTIES(p,v) in
-    PROPERTIES (v) READONLY filename
-    FILTERS in(p,v) AND NOT isHidden(v)
-    ORDERS filename(v)
+    OBJECTS a = Account
+    PROPERTIES (a) email
+    FILTERS folder(a) == p
 ;
 
 NAVIGATOR {

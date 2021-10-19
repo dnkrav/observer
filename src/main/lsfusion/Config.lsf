@@ -4,6 +4,7 @@ REQUIRE MasterData, Utils, Time;
 
 NAMESPACE Observer;
 
+// Local storage
 localStorage 'Absolute path to local storage of Mbox files' = DATA STRING ();
 
 CLASS Storage 'Storage for Mbox Files'

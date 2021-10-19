@@ -1,6 +1,6 @@
 MODULE Runner;
 
-REQUIRE Mbox;
+REQUIRE Itemail;
 
 NAMESPACE Observer;
 
@@ -11,6 +11,10 @@ isBlocked 'Import process is busy' () = DATA BOOLEAN ();
 mboxImporter 'Import data from MBOX archive' INTERNAL 'lsfusion.solutions.observer.MboxImporter' (Mbox);
 
 // Runner for MBOX import Scheduler
+lastImporterRun 'Name of the last processed MBOX archive' = DATA STRING ();
+lastImporterResult 'Result of the last run' = DATA STRING ();
+lastImporterOutput 'Output from the last run' = DATA TEXT ();
+
 importNextFile 'Import from next MBOX archive' () {
     LOCAL nextFile = Mbox(); 
     nextFile() <- GROUP LAST Mbox v IF toImport(v) AND NOT isImported(v) ORDER filename(v);
@@ -27,25 +31,78 @@ importNextFile 'Import from next MBOX archive' () {
         printToLog('Import is blocked by another process');
         RETURN;
     }
-    printToLog('Start importing from MBOX archive: ' + filename(nextFile()));
+    
+    IF lastImporterResult() != 'Success' THEN {
+        printToLog('Import was not started, because the last Import Result requires action of the Admininstrator');
+        RETURN;
+    }
+    
     NEWSESSION { 
+        lastImporterResult() <- 'Stop';
+        lastImporterOutput() <- NULL;
         isBlocked() <- TRUE; 
         APPLY; 
     }
     
+    printToLog('Start importing from MBOX archive: ' + filelink(nextFile()));
+    fileExists(filelink(nextFile()));
+    IF NOT fileExists() THEN {
+        lastImporterOutput() <- 'Import was not started, because the next file does not exist ' + filelink(nextFile());
+        printToLog(lastImporterOutput());
+        isBlocked() <- NULL;
+        APPLY;
+        RETURN;
+    }
+    
     mboxImporter(nextFile());
     
-    printToLog('Stop importing from MBOX archive: ' + filename(nextFile()));
+    printToLog('Stop importing from MBOX archive: ' + filelink(nextFile()));
+    printToLog(lastImporterOutput());
     isBlocked() <- NULL;
     APPLY;
 }
 
 // Process monitor
-EXTEND FORM parameters PROPERTIES numberToImport(), isBlocked();
+FORM importer 'MBOX Import'
+    OBJECTS m = Mbox
+    PROPERTIES (m) filename, path, toImport, isImported, wrongFormat, length, progress
+    PROPERTIES() PANEL isBlocked, importNextFile TOOLBAR DRAW m, lastImporterRun, lastImporterResult, lastImporterOutput
+;
+
+DESIGN importer { 
+    NEW pane FIRST { 
+        fill = 1;
+        MOVE BOX (m);
+        NEW lastRun {
+            caption = 'Last Importer Run';
+            alignment = STRETCH;
+            MOVE PROPERTY (isBlocked());
+            MOVE PROPERTY (lastImporterRun()) { alignment = STRETCH; }
+            MOVE PROPERTY (lastImporterResult()) { alignment = STRETCH; }
+            MOVE PROPERTY (lastImporterOutput()) { fill = 1;}
+        }
+    }
+}
+
+NAVIGATOR {
+    NEW importer FIRST;
+}
+
+EXTEND FORM parameters 
+    PROPERTIES () numberToImport, isBlocked, lastImporterResult
+    PROPERTIES () READONLY lastImporterRun, lastImporterOutput
+;
 DESIGN parameters { pane { 
     NEW process {
         caption = 'Process monitor';
         MOVE PROPERTY (numberToImport()); 
         MOVE PROPERTY (isBlocked());
+    }
+    NEW lastRun {
+        caption = 'Last Importer Run';
+        alignment = STRETCH;
+        MOVE PROPERTY (lastImporterRun()) { alignment = STRETCH; }
+        MOVE PROPERTY (lastImporterResult()) { alignment = STRETCH; }
+        MOVE PROPERTY (lastImporterOutput()) { fill = 1;}
     }
 }}
