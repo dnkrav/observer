@@ -12,7 +12,7 @@ mboxImporter 'Import data from MBOX archive' INTERNAL 'lsfusion.solutions.observ
 
 // Runner for MBOX import Scheduler
 lastImporterRun 'Name of the last processed MBOX archive' = DATA STRING ();
-lastImporterResult 'Result of the last run' = DATA STRING ();
+lastImporterResult 'Result of the last run' = DATA STRING[10] ();
 lastImporterOutput 'Output from the last run' = DATA TEXT ();
 
 importNextFile 'Import from next MBOX archive' () {
@@ -54,7 +54,30 @@ importNextFile 'Import from next MBOX archive' () {
         RETURN;
     }
     
-    mboxImporter(nextFile());
+    // Main Run with logging
+    FOR Mbox m AND m == nextFile() NEW l = MboxLog DO {
+        mbox(l) <- m;
+        start(l) <- currentDateTime();
+        
+        LOCAL initial = INTEGER ();
+        initial() <- imported(m); 
+        TRY {
+        
+            mboxImporter(m);
+        
+            output(l) <- lastImporterOutput();
+        }
+        CATCH {
+            printToLog('Import Run ended with exception: ' + messageCaughtException());
+            output(l) <- messageCaughtException();
+        }
+        
+        result(l) <- lastImporterResult();
+        lines(l) <- progress(m);
+        added(l) <- OVERRIDE (imported(m) - initial()), imported(m), 0;
+        finish(l) <- currentDateTime();
+    }
+    
     
     printToLog('Stop importing from MBOX archive: ' + filelink(nextFile()));
     printToLog(lastImporterOutput());
@@ -65,27 +88,40 @@ importNextFile 'Import from next MBOX archive' () {
 // Process monitor
 FORM importer 'MBOX Import'
     OBJECTS m = Mbox
-    PROPERTIES (m) filename, path, toImport, isImported, wrongFormat, length, progress
+    PROPERTIES (m) filename, path, toImport, isImported, wrongFormat, length, progress, messages, imported
+    
+    OBJECTS l = MboxLog
+    PROPERTIES (l) READONLY start, finish, result, email, filname, length, messages, lines, added, output PANEL
+    
     PROPERTIES() PANEL isBlocked, importNextFile TOOLBAR DRAW m, lastImporterRun, lastImporterResult, lastImporterOutput
 ;
 
 DESIGN importer { 
     NEW pane FIRST { 
         fill = 1;
+        alignment = STRETCH;
         MOVE BOX (m);
-        NEW lastRun {
-            caption = 'Last Importer Run';
+        MOVE BOX (l);
+        NEW details {
+            type = CONTAINERH;
             alignment = STRETCH;
-            MOVE PROPERTY (isBlocked());
-            MOVE PROPERTY (lastImporterRun()) { alignment = STRETCH; }
-            MOVE PROPERTY (lastImporterResult()) { alignment = STRETCH; }
-            MOVE PROPERTY (lastImporterOutput()) { fill = 1;}
+            height = 200;
+            MOVE PROPERTY (output(l)) { alignment = STRETCH; fill = 1; panelCaptionVertical = TRUE; }
+            NEW lastRun {
+                caption = 'Last Importer Run';
+                alignment = STRETCH;
+                fill = 1;
+                MOVE PROPERTY (isBlocked());
+                MOVE PROPERTY (lastImporterRun()) { alignment = STRETCH; }
+                MOVE PROPERTY (lastImporterResult()) { alignment = STRETCH; }
+                MOVE PROPERTY (lastImporterOutput()) { alignment = STRETCH; fill = 1; panelCaptionVertical = TRUE;}
+            }
         }
     }
 }
 
 NAVIGATOR {
-    NEW importer FIRST;
+    NEW importer BEFORE masterData;
 }
 
 EXTEND FORM parameters 

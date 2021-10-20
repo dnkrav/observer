@@ -66,7 +66,7 @@ public class MboxImporter extends InternalAction {
     private long countLines(ExecutionContext<ClassPropertyInterface> context, DataObject commandArgs,
                               String fileLink)
             throws IOException, ScriptingErrorLog.SemanticErrorException, SQLException, SQLHandledException {
-        long count = 0;
+        long count;
         try {
             count = (long) LM.findProperty("length[Mbox]").readClasses(context, commandArgs).getValue();
         } catch (NullPointerException emptyLength) {
@@ -131,7 +131,7 @@ public class MboxImporter extends InternalAction {
             String next;
             boolean confidence;
             FromLine fromLine = new FromLine();
-            Itemail itemail = new Itemail();
+            Itemail itemail;
 
             // First run
             next = importer.readLine();
@@ -171,6 +171,7 @@ public class MboxImporter extends InternalAction {
             } while (next != null);
 
             // Success operation flags
+            LM.findProperty("messages[Mbox]").change(messages, context, commandArgs);
             LM.findProperty("isImported[Mbox]").change(true, context, commandArgs);
             LM.findProperty("lastImporterResult").change("Success", context, commandArgs);
             LM.findProperty("lastImporterOutput").

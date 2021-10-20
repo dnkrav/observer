@@ -12,7 +12,7 @@ TABLE itemail(Itemail);
 // RFC 4155: The application/mbox Media Type Standard
 // https://datatracker.ietf.org/doc/html/rfc4155
 mbox 'Source MBOX' = DATA Mbox(Itemail);
-messages 'Imported Messages' = GROUP SUM 1 BY mbox(Itemail m);
+imported 'Imported Messages' = GROUP SUM 1 BY mbox(Itemail m);
 messages 'Messages' = GROUP SUM 1 BY account(mbox(Itemail m));
 
 // The From_ line of the message

@@ -26,6 +26,7 @@ wrongFormat 'Wrong file format' = DATA BOOLEAN (Mbox);
 
 // Counters
 length 'Number of lines' = DATA LONG (Mbox);
+messages 'Number of messages' = DATA INTEGER (Mbox);
 progress 'Imported lines' = DATA LONG (Mbox);
 
 // Aggregating flag
@@ -37,29 +38,25 @@ isHidden 'Keep files until removal from storage' = DATA BOOLEAN (Mbox);
 // Uniqueness check for the MBOX archives by its filenames
 mbox = GROUP AGGR Mbox v BY filename(v);
 
+// Import Log
+CLASS MboxLog 'Log of MBOX files import';
+TABLE mboxlog(MboxLog);
+
+mbox 'Mbox file' = DATA Mbox (MboxLog);
+email 'Account' (MboxLog l) = email(mbox(l));
+filname 'Filename' (MboxLog l) = filename(mbox(l));
+length 'Lines in source' (MboxLog l) = length(mbox(l));
+messages 'Messages in source' (MboxLog l) = messages(mbox(l));
+start 'Date/Time Start' = DATA DATETIME (MboxLog);
+finish 'Date/Time Finish' = DATA DATETIME (MboxLog);
+result 'Result' = DATA STRING[10] (MboxLog);
+output 'Output of the run' = DATA TEXT (MboxLog);
+lines 'Lines read' = DATA LONG (MboxLog);
+added 'Messages added' = DATA INTEGER (MboxLog);
+
+// Actions
 WHEN SET (isImported(Mbox v)) DO {
-    IF NOT toImport(v) THEN RETURN;
-    fileExists(filelinkOut(v));
-    IF fileExists() THEN {
-        TRY {
-            delete(filelink(v));
-        }
-        CATCH {
-            MESSAGE 'Cannot delete file ' + filelink(v) + ':\n' + messageCaughtException();
-        }
-        fileExists(filelink(v));
-        IF NOT fileExists() THEN {
-            path(v) <- archPath();
-            filename(v) <- filenameArch(v);
-        }
-        toImport(v) <- NULL;
-        isImported(v) <- TRUE;
-    }
-    ELSE {
-        // Accumulate files with errors
-        isImported(v) <- NULL;
-        toImport(v) <- NULL;
-    }
+    toImport(v) <- NULL;
 }
 
 // Files upload
