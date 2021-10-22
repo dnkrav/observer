@@ -32,6 +32,24 @@ checkDirectory (STRING dir) {
         mkdir(pathDir());
 }
 
+// Scroll Bar for large textual fileds
+META scrollBarView(form, pane, property, captionText)
+    DESIGN form { pane {        
+        NEW description {
+            fill = 1;
+            height = 1;
+            type = SCROLL;
+            caption = captionText;
+            MOVE PROPERTY(property) {
+                caption = '';
+                autoSize = TRUE;
+                alignment = STRETCH;
+                panelCaptionVertical = TRUE;
+            } 
+        }
+    } }
+END 
+
 // Forms
 
 FORM storage 'Edit local storage'
