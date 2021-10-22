@@ -7,8 +7,8 @@ NAMESPACE Observer;
 CLASS Mbox 'MBOX files';
 TABLE mbox(Mbox);
 
-account 'Folder' = DATA Account (Mbox);
-email 'Folder' (Mbox m) = email(account(m)) CHARWIDTH 30;
+account 'Account' = DATA Account (Mbox);
+email 'Account' (Mbox m) = name(account(m)) CHARWIDTH 30;
 
 filename 'File Name' = DATA STRING (Mbox) CHARWIDTH 30;
 path 'Storage containing the MBOX File' = DATA STRING (Mbox);

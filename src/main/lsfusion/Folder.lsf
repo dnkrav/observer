@@ -1,6 +1,6 @@
 MODULE Folder;
 
-REQUIRE Config;
+REQUIRE Email, Config;
 
 NAMESPACE Observer; 
 
@@ -12,14 +12,9 @@ name 'Name' = DATA STRING[200] (Folder) NONULL;
 
 folder 'Folder' = GROUP AGGR Folder p BY name(p);
 
-CLASS Account 'Account';
-TABLE account(Account);
-
-email 'Email' = DATA STRING (Account) CHARWIDTH 30 NONULL;
+// Extend the Account class of the Platform
 folder 'Folder' = DATA Folder (Account);
 nameFolder 'Folder' (Account m) = name(folder(m)) CHARWIDTH 30;
-
-account 'Account' = GROUP AGGR Account p BY email(p);
 
 // Forms
 showDelete 'Show deletion button' = DATA LOCAL BOOLEAN ();
@@ -29,7 +24,7 @@ FORM folder 'Edit Folder'
     PROPERTIES (p) name
     
     OBJECTS a = Account 
-    PROPERTIES (a) email, NEW , DELETE 
+    PROPERTIES (a) name, NEW , DELETE 
     FILTERS folder(a) == p
     
     PROPERTIES showDelete()
@@ -60,7 +55,7 @@ FORM folders 'Folders'
     PROPERTIES (p) NEWSESSION NEW , EDIT , DELETE 
     
     OBJECTS a = Account
-    PROPERTIES (a) email
+    PROPERTIES (a) name
     FILTERS folder(a) == p
 ;
 
