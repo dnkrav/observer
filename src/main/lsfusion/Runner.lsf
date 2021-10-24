@@ -10,6 +10,9 @@ isBlocked 'Import process is busy' () = DATA BOOLEAN ();
 // Import data from MBOX format
 mboxImporter 'Import data from MBOX archive' INTERNAL 'lsfusion.solutions.observer.MboxImporter' (Mbox);
 
+// Read MIME Headers
+headerReader 'Read MIME Headers' INTERNAL 'lsfusion.solutions.observer.HeaderReader' (Itemail);
+
 // Runner for MBOX import Scheduler
 lastImporterRun 'Name of the last processed MBOX archive' = DATA STRING ();
 lastImporterResult 'Result of the last run' = DATA STRING[10] ();
@@ -93,7 +96,7 @@ FORM importer 'MBOX Import'
     OBJECTS l = MboxLog
     PROPERTIES (l) READONLY start, finish, result, email, filname, length, messages, lines, added, output PANEL
     
-    PROPERTIES() PANEL isBlocked, importNextFile TOOLBAR DRAW m, lastImporterRun, lastImporterResult, lastImporterOutput
+    PROPERTIES() PANEL isBlocked, importNextFile TOOLBAR DRAW m, lastImporterRun, lastImporterResult, scrollOutput = lastImporterOutput
 ;
 
 DESIGN importer { 
@@ -114,11 +117,11 @@ DESIGN importer {
                 MOVE PROPERTY (isBlocked());
                 MOVE PROPERTY (lastImporterRun()) { alignment = STRETCH; }
                 MOVE PROPERTY (lastImporterResult()) { alignment = STRETCH; }
-                MOVE PROPERTY (lastImporterOutput()) { alignment = STRETCH; fill = 1; panelCaptionVertical = TRUE;}
             }
         }
     }
 }
+@scrollBarView(importer, lastRun, scrollOutput, 'Output of the last run');
 
 NAVIGATOR {
     NEW importer BEFORE masterData;
@@ -142,3 +145,7 @@ DESIGN parameters { pane {
         MOVE PROPERTY (lastImporterOutput()) { fill = 1;}
     }
 }}
+
+EXTEND FORM folders
+    PROPERTIES (m) SHOWIF NOT converted(m) TOOLBAR headerReader
+;

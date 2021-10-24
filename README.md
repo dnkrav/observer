@@ -55,6 +55,10 @@ Data from MBOX archives uploaded by user are being automatically imported into D
 
 ## Data Import
 
+Mbox archive split into separate messages done on the base of [RFC 4155: The application/mbox Media Type Standard](https://datatracker.ietf.org/doc/html/rfc4155)
+
+Message content processing forked for customized implementation from the [lsFusion Platform EmailReceiver class](https://github.com/lsfusion/platform/blob/master/server/src/main/java/lsfusion/server/physics/dev/integration/external/to/mail/EmailReceiver.java)
+
 The data import runs in Scheduler.
 It checks whether any newly uploaded MBOX archives are available.
 Get next MBOX archive from the conversion queue (if any) and runs importing job, if there is no active importing already. 

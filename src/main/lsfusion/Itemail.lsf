@@ -12,6 +12,7 @@ TABLE itemail(Itemail);
 // RFC 4155: The application/mbox Media Type Standard
 // https://datatracker.ietf.org/doc/html/rfc4155
 mbox 'Source MBOX' = DATA Mbox(Itemail);
+account 'Source Account' (Itemail m) = account(mbox(m));
 imported 'Imported Messages' = GROUP SUM 1 BY mbox(Itemail m);
 messages 'Messages' = GROUP SUM 1 BY account(mbox(Itemail m));
 
@@ -22,6 +23,14 @@ timestamp 'UTC timestamp Received' = DATA STRING[30] (Itemail);
 datetime 'Date/Time Received' = DATA DATETIME (Itemail);
 message 'Entire Message' = DATA TEXT (Itemail);
 
+// Populate Email
+itemail 'Mbox Record' = DATA Itemail(Email);
+converted 'Converted into Email' = DATA DATETIME (Itemail);
+conversionError 'Error at conversion into Email' = DATA TEXT (Itemail);
+// Extend Email default Class - drop limits for the address length
+from '{email.from.address.email}' = DATA STRING (Email);
+to '{email.to.address.email}' = DATA STRING (Email);
+
 // Headers
 from 'From' = DATA STRING (Itemail);
 dateFrom 'Date' = DATA STRING (Itemail);
@@ -29,15 +38,23 @@ subject 'Subject' = DATA STRING (Itemail);
 to 'To' = DATA STRING (Itemail);
 cc 'Cc' = DATA STRING (Itemail);
 
-// Properties
+// Content-Type regarding the RFC 2046
+// https://datatracker.ietf.org/doc/html/rfc2045
+// For syntax see section 5.1
 contentType 'Content-Type' = DATA STRING (Itemail);
+// Value of related attribute
+contentTypeParameter 'Parameter' = DATA STRING (Itemail);
+// For syntax see section 6.1
+contentTransferEncoding 'Content-Transfer-Encoding' = DATA STRING (Itemail);
 
 // Identifiers
+contentID 'Content-ID' = DATA STRING (Itemail);
 messageID 'Message-ID' = DATA STRING (Itemail);
 boundary 'Boundary between parts' = DATA STRING (Itemail);
+internalID 'Internal ID' (Itemail m) = CONCAT ' ', name(account(mbox(m))), envsender(m) MATERIALIZED;
 
 // The envelope From string is a unique identifier of the Email
-envelope = GROUP AGGR Itemail v BY account(mbox(v)), envsender(v);
+envelope = GROUP AGGR Itemail v WHERE v IS Itemail BY account(mbox(v)), envsender(v);
 
 // Forms
 
@@ -46,9 +63,17 @@ EXTEND FORM folders
     PROPERTIES (v) messages
 
     OBJECTS m = Itemail
-    PROPERTIES (m) READONLY envsender, timestamp, message PANEL 
+    PROPERTIES (m) READONLY envsender, timestamp, converted
+    PROPERTIES READONLY PANEL scrollMessage = message(m) , 
+                              scrollConversionError = conversionError(m) SHOWIF conversionError(m)
     PROPERTIES (m) DELETE GRID 
     FILTERS mbox(m) == v 
+    
+    OBJECTS e = Email PANEL 
+    PROPERTIES (e) SHOWIF converted(m) READONLY dateTimeSent, from, to, subject, dateTimeReceived, id,
+                                                scrollEmail = message 
+    PROPERTIES (e) SHOWIF converted(m) openEMLFile TOOLBAR DRAW m
+    FILTERS itemail(e) == m
 ;
 
 DESIGN folders { pane {
@@ -57,6 +82,32 @@ DESIGN folders { pane {
         alignment = STRETCH;
         fill = 2;
         MOVE BOX (m) {alignment = STRETCH; fill = 1;}
-        MOVE PROPERTY (message(m)) { alignment = STRETCH; fill = 2; panelCaptionVertical = TRUE; }
+        NEW info {
+            type = TABBED;
+            alignment = STRETCH; 
+            fill = 2;
+            NEW email FIRST {
+                type = CONTAINERV;
+                caption = 'Email';
+                NEW sent {
+                    type = CONTAINERH;
+                    alignment = STRETCH;
+                    MOVE PROPERTY (dateTimeSent(e));
+                    MOVE PROPERTY (from(e));
+                }
+                MOVE PROPERTY (to(e));
+                MOVE PROPERTY (subject(e));
+                NEW ids {
+                    type = CONTAINERH;
+                    alignment = STRETCH;
+                    MOVE PROPERTY (dateTimeReceived(e));
+                    MOVE PROPERTY (id(e));
+                }
+            }
+        }
     }
 } }
+
+@scrollBarView(folders, email, scrollEmail, 'Message');
+@scrollBarView(folders, info, scrollMessage, 'MIME message');
+@scrollBarView(folders, info, scrollConversionError, 'Error at conversion into EML');

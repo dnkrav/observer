@@ -35,7 +35,7 @@ checkDirectory (STRING dir) {
 // Scroll Bar for large textual fileds
 META scrollBarView(form, pane, property, captionText)
     DESIGN form { pane {        
-        NEW description {
+        NEW desc###property {
             fill = 1;
             height = 1;
             type = SCROLL;
