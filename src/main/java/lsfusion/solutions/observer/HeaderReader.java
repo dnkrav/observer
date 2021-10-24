@@ -101,6 +101,205 @@ public class HeaderReader extends InternalAction {
         return String.join(", ", allRecipients);
     }
 
+    private String decodeFileName(String value) {
+        try {
+            Pattern p = Pattern.compile("\\=\\?[^?]*\\?\\w\\?[^?]*\\?\\=");
+
+            for(Matcher m = p.matcher(value);
+                m.find();
+                value = value.replace(m.group(), MimeUtility.decodeText(m.group()))) {
+                // This empty body checks if there is an exception possible
+            }
+
+            value = MimeUtility.decodeText(value);
+
+        } catch (UnsupportedEncodingException e) {
+            value = "attachment.txt";
+        }
+
+        return value;
+    }
+
+    private HeaderReader.MultipartBody extractWinMail(File winMailFile)
+            throws IOException {
+        HMEFMessage msg = new HMEFMessage(new FileInputStream(winMailFile));
+        Map<String, FileData> attachments = new HashMap();
+        Iterator var5 = msg.getAttachments().iterator();
+
+        while(var5.hasNext()) {
+            Attachment attach = (Attachment)var5.next();
+            String attachName = attach.getFilename();
+            attachments.put(attachName,
+                    new FileData(new RawFileData(attach.getContents()), BaseUtils.getFileExtension(attachName)));
+        }
+
+        return new HeaderReader.MultipartBody(msg.getBody(), attachments);
+    }
+
+    private Object getBodyPartContent(BodyPart bp)
+            throws MessagingException, IOException {
+        Object content = null;
+        if (bp instanceof IMAPBodyPart) {
+            String encoding = ((IMAPBodyPart)bp).getEncoding();
+            if (encoding != null) {
+                Object plainContent = null;
+
+                try {
+                    plainContent = bp.getContent();
+                } catch (Exception var5) {
+                }
+
+                content = plainContent instanceof String ? plainContent :
+                        MimeUtility.decode(bp.getInputStream(), encoding);
+            }
+        }
+
+        return content != null ? content : bp.getContent();
+    }
+
+    private String parseIMAPInputStream(BodyPart bp, IMAPInputStream content)
+            throws IOException, MessagingException {
+        String contentType = bp.getContentType();
+        if (contentType != null) {
+            org.apache.http.entity.ContentType ct = null;
+
+            try {
+                ct = ContentType.parse(contentType);
+            } catch (Exception var7) {
+            }
+
+            if (ct != null) {
+                String mimeType = ct.getMimeType();
+                if (mimeType.equals("text/plain")) {
+                    byte[] bytes = IOUtils.readBytesFromStream(content);
+                    return new String(bytes, ct.getCharset());
+                }
+            }
+        }
+
+        return null;
+    }
+
+    // Without archive unpacking
+    private Map<String, FileData> unpack(RawFileData byteArray, String fileName) {
+        String[] fileNameAndExt = fileName.split("\\.");
+        String fileExtension = fileNameAndExt.length > 1 ? fileNameAndExt[fileNameAndExt.length - 1].trim() : "";
+
+        Map<String, FileData> attachments = new HashMap();
+        attachments.put(fileName, new FileData(byteArray, fileExtension));
+
+        return attachments;
+    }
+
+    private HeaderReader.MultipartBody getMultipartBodyStream(
+            String subjectEmail, FilterInputStream filterInputStream, String fileName)
+            throws IOException {
+        RawFileData byteArray = new RawFileData(filterInputStream);
+        Map<String, FileData> attachments = new HashMap();
+        attachments.putAll(this.unpack(byteArray, fileName));
+        return new HeaderReader.MultipartBody(subjectEmail, attachments);
+    }
+
+    private HeaderReader.MultipartBody getMultipartBody(String subjectEmail, Multipart mp)
+            throws IOException, MessagingException {
+        String body = "";
+        Map<String, FileData> attachments = new HashMap();
+
+        for(int i = 0; i < mp.getCount(); ++i) {
+            // In case of mbox archive tends to be MimeBodyPart, which extends BodyPart and implements MimePart
+            BodyPart bp = mp.getBodyPart(i);
+            String disp = bp.getDisposition();
+            if (disp != null && disp.equalsIgnoreCase("attachment")) {
+                String fileName = this.decodeFileName(bp.getFileName());
+                InputStream is = bp.getInputStream();
+                File f = File.createTempFile("attachment", "");
+
+                try {
+                    FileOutputStream fos = new FileOutputStream(f);
+                    byte[] buf = new byte[4096];
+
+                    int bytesRead;
+                    while((bytesRead = is.read(buf)) != -1) {
+                        fos.write(buf, 0, bytesRead);
+                    }
+
+                    fos.close();
+                    if (bp.getContentType() != null && bp.getContentType().contains("application/ms-tnef")) {
+                        attachments.putAll(this.extractWinMail(f).attachments);
+                    } else {
+                        attachments.putAll(this.unpack(new RawFileData(f), fileName));
+                    }
+                } catch (IOException var20) {
+                    ServerLoggers.mailLogger.error(
+                            "Error reading attachment '" + fileName + "' from email '" + subjectEmail + "'");
+                    throw var20;
+                } finally {
+                    if (!f.delete()) {
+                        f.deleteOnExit();
+                    }
+
+                }
+            } else {
+                try {
+                    Object content = this.getBodyPartContent(bp);
+                    if (content instanceof FilterInputStream) {
+                        RawFileData byteArray = new RawFileData((FilterInputStream)content);
+                        String fileName = this.decodeFileName(bp.getFileName());
+                        attachments.putAll(this.unpack(byteArray, fileName));
+                    } else if (content instanceof MimeMultipart) {
+                        // The way for the mbox archive
+                        body = this.getMultipartBody(subjectEmail, (Multipart)content).message;
+                    } else if (content instanceof IMAPInputStream) {
+                        body = this.parseIMAPInputStream(bp, (IMAPInputStream)content);
+                    } else {
+                        body = String.valueOf(content);
+                    }
+                } catch (IOException var19) {
+                    throw new RuntimeException("Email subject: " + subjectEmail, var19);
+                }
+            }
+        }
+
+        return new HeaderReader.MultipartBody(body, attachments);
+    }
+
+    private HeaderReader.MultipartBody getMimeMessageContent(MimeMessage data)
+            throws IOException, MessagingException {
+        // Possible types of the content object:
+        // Object, meaning getContent from DataHandler
+        // abstract Message implements Part
+        // abstract Multipart
+        // MimeMultipart extends Multipart
+        Object content = data.getContent();
+        HeaderReader.MultipartBody messageEmail;
+
+        // Checking "instanceof" rather than value using a switch statement
+        // https://softwareengineering.stackexchange.com/a/271877
+        if (content instanceof Multipart) {
+            // In case of mbox archive this selection is going to be MimeMultipart, which extends Multipart
+            messageEmail = this.getMultipartBody(
+                    data.getSubject(), (Multipart)content);
+        } else if (content instanceof FilterInputStream) {
+            messageEmail = this.getMultipartBodyStream(
+                    data.getSubject(), (FilterInputStream)content, this.decodeFileName(data.getFileName()));
+        } else if (content instanceof String) {
+            // Mask the default value for type char
+            messageEmail = new HeaderReader.MultipartBody(
+                    ((String)content).replace("\u0000", ""), (Map)null);
+        } else {
+            messageEmail = null;
+        }
+
+        if (messageEmail == null) {
+            messageEmail = new HeaderReader.MultipartBody(
+                    content == null ? null : String.valueOf(content), (Map)null);
+            ServerLoggers.mailLogger.error(
+                    "Warning: missing attachment '" + content + "' from email '" + data.getSubject() + "'");
+        }
+
+        return messageEmail;
+    }
+
     public boolean importEmail(ExecutionContext<ClassPropertyInterface> context,
                                DataObject commandArgs, MimeMessage data)
             throws IOException, ScriptingErrorLog.SemanticErrorException, SQLException, SQLHandledException {
@@ -144,6 +343,15 @@ public class HeaderReader extends InternalAction {
 
             // Value from the header "Subject: "
             LM.findProperty("subject[Email]").change(data.getSubject(), emailContext, emailObject);
+
+            // Output from the textual content parsing
+            HeaderReader.MultipartBody messageContent = this.getMimeMessageContent(data);
+            LM.findProperty("message[Email]").change(messageContent.message, emailContext, emailObject);
+
+            // The parsed attachments from the MultipartBody are being dropped in order to keep the database smaller
+            // once needed, the functionality may be forked from the EmailReceiver.importAttachments routine of lsFusion
+            // so far, the attachments data are available in EML export either in the item message from the mbox archive
+            // @ToDo create dynamic export for the EML format
 
             // Binary file
             ByteArrayOutputStream out = new ByteArrayOutputStream();
