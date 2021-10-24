@@ -37,20 +37,22 @@ public class MboxImporter extends InternalAction {
             throws SQLException, SQLHandledException {
         try {
             DataObject commandArgs = context.getDataKeyValue(mboxInterface);
-            importMbox(context, commandArgs);
+            this.importMbox(context, commandArgs);
         }
         catch (Exception e) {
             throw ExceptionUtils.propagate(e, SQLException.class, SQLHandledException.class);
         }
     }
 
-    private static long countLines(String fileLink)
+    private static long[] countLines(String fileLink)
             throws IOException {
         long count = 0;
 
         FileInputStream fileInput = new FileInputStream(fileLink);
         InputStreamReader filestream = new InputStreamReader(fileInput, StandardCharsets.UTF_8);
         BufferedReader importer = new BufferedReader(filestream);
+
+        long length = fileInput.getChannel().size();
 
         while (importer.readLine() != null) {
             count++;
@@ -60,7 +62,7 @@ public class MboxImporter extends InternalAction {
         filestream.close();
         fileInput.close();
 
-        return count;
+        return new long[]{length, count};
     }
 
     private long countLines(ExecutionContext<ClassPropertyInterface> context, DataObject commandArgs,
@@ -70,9 +72,11 @@ public class MboxImporter extends InternalAction {
         try {
             count = (long) LM.findProperty("length[Mbox]").readClasses(context, commandArgs).getValue();
         } catch (NullPointerException emptyLength) {
-            count = countLines(fileLink);
+            long[] dims = this.countLines(fileLink);
+            count = dims[1];
             // Store the file length
             try (ExecutionContext.NewSession<ClassPropertyInterface> itemContext = context.newSession()) {
+                LM.findProperty("size[Mbox]").change(dims[0], itemContext, commandArgs);
                 LM.findProperty("length[Mbox]").change(count, itemContext, commandArgs);
                 itemContext.applyException();
             }
@@ -115,7 +119,7 @@ public class MboxImporter extends InternalAction {
                     readClasses(context, commandArgs).getValue();
 
             // Initialize progress
-            if (countLines(context, commandArgs, fileLink) == 0) {
+            if (this.countLines(context, commandArgs, fileLink) == 0) {
                 return;
             }
             long number = 0;

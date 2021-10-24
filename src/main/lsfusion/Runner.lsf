@@ -62,22 +62,44 @@ importNextFile 'Import from next MBOX archive' () {
         mbox(l) <- m;
         start(l) <- currentDateTime();
         
-        LOCAL initial = INTEGER ();
-        initial() <- imported(m); 
+        LOCAL initialImported = INTEGER ();
+        LOCAL initialRead = INTEGER ();
+        initialImported() <- imported(m); 
+        initialRead() <- emails(m); 
+        output(l) <- 'Import initiated by: ' + (OVERRIDE name(currentUser()), 'System User');
         TRY {
-        
             mboxImporter(m);
         
-            output(l) <- lastImporterOutput();
+            output(l) <- CONCAT '\n', output(l), (OVERRIDE lastImporterOutput(), '');
         }
         CATCH {
             printToLog('Import Run ended with exception: ' + messageCaughtException());
-            output(l) <- messageCaughtException();
+            output(l) <- CONCAT '\n', output(l), (OVERRIDE messageCaughtException(), '');
         }
         
         result(l) <- lastImporterResult();
         lines(l) <- progress(m);
-        added(l) <- OVERRIDE (imported(m) - initial()), imported(m), 0;
+        added(l) <- OVERRIDE (imported(m) - initialImported()), imported(m), 0;
+        imported(l) <- currentDateTime();
+        
+        // Populate Emails
+        output(l) <- CONCAT '\n', output(l),
+                    'Found ' + [GROUP SUM 1 IF NOT converted(Itemail item) BY mbox(item)](m) + ' Emails for parsing';
+                    
+        FOR Itemail item AND mbox(item) == m AND NOT converted(item) DO {
+            NEWSESSION {
+                TRY {
+                    headerReader(item);
+                }
+                CATCH {
+                    conversionError(item) <- messageCaughtException();
+                    APPLY;
+                }
+            }
+        }
+        
+        read(l) <- OVERRIDE (emails(m) - initialRead()), emails(m), 0;
+        output(l) <- CONCAT '\n', output(l), (OVERRIDE 'Created ' + read(l) + ' new Emails', '');
         finish(l) <- currentDateTime();
     }
     
@@ -91,12 +113,14 @@ importNextFile 'Import from next MBOX archive' () {
 // Process monitor
 FORM importer 'MBOX Import'
     OBJECTS m = Mbox
-    PROPERTIES (m) filename, path, toImport, isImported, wrongFormat, length, progress, messages, imported
+    PROPERTIES (m) filename, path, toImport, isImported, wrongFormat, size, length, progress, messages, imported, emails
     
     OBJECTS l = MboxLog
-    PROPERTIES (l) READONLY start, finish, result, email, filname, length, messages, lines, added, output PANEL
+    PROPERTIES (l) READONLY start, imported, finish, result, email, filname, size, length, messages, lines, added, read
+    PROPERTIES (l) READONLY PANEL output
     
-    PROPERTIES() PANEL isBlocked, importNextFile TOOLBAR DRAW m, lastImporterRun, lastImporterResult, scrollOutput = lastImporterOutput
+    PROPERTIES() PANEL isBlocked, importNextFile TOOLBAR DRAW m
+    PROPERTIES() PANEL lastImporterRun, lastImporterResult, scrollOutput = lastImporterOutput
 ;
 
 DESIGN importer { 
@@ -108,7 +132,7 @@ DESIGN importer {
         NEW details {
             type = CONTAINERH;
             alignment = STRETCH;
-            height = 200;
+            height = 240;
             MOVE PROPERTY (output(l)) { alignment = STRETCH; fill = 1; panelCaptionVertical = TRUE; }
             NEW lastRun {
                 caption = 'Last Importer Run';
@@ -150,3 +174,7 @@ EXTEND FORM folders
     PROPERTIES (m) SHOWIF NOT converted(m) TOOLBAR headerReader 
 ;
 DESIGN folders { TOOLBAR(m) { MOVE PROPERTY (headerReader(m)) FIRST; }}
+
+EXTEND FORM Email.mail
+    PROPERTIES (e) deleteGrid = DELETE GRID 
+;

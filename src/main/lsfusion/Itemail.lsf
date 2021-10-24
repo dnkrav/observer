@@ -27,6 +27,8 @@ message 'Entire Message' = DATA TEXT (Itemail);
 itemail 'Mbox Record' = DATA Itemail(Email);
 converted 'Converted into Email' = DATA DATETIME (Itemail);
 conversionError 'Error at conversion into Email' = DATA TEXT (Itemail);
+emails 'Emails' = GROUP SUM 1 BY mbox(itemail(Email m));
+emails 'Emails' = GROUP SUM 1 BY account(mbox(itemail(Email m)));
 // Extend Email default Class - drop limits for the address length
 from '{email.from.address.email}' = DATA STRING (Email);
 to '{email.to.address.email}' = DATA STRING (Email);
@@ -70,8 +72,8 @@ exportEMLFile '{email.open.eml.file.email}' (Email email)  { exportEMLFile(itema
 // Forms
 
 EXTEND FORM folders
-    PROPERTIES (a) messages
-    PROPERTIES (v) messages
+    PROPERTIES (a) messages, emails
+    PROPERTIES (v) messages, emails
 
     OBJECTS m = Itemail
     PROPERTIES (m) READONLY envsender, timestamp, converted

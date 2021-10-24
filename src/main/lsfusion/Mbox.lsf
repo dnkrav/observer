@@ -14,6 +14,8 @@ filename 'File Name' = DATA STRING (Mbox) CHARWIDTH 30;
 path 'Storage containing the MBOX File' = DATA STRING (Mbox);
 filelink 'Link to MBOX File' (Mbox v) = CONCAT '/', path(v), filename(v) MATERIALIZED CHARWIDTH 100; // pathbuilder hardcoded for linux servers
 
+size 'Size, bytes' = DATA LONG (Mbox);
+
 // Filename parsing at upload
 filenameExt 'Extension at upload' = DATA STRING (Mbox) CHARWIDTH 5;
 filenameArch 'File Name after import' = DATA STRING (Mbox) CHARWIDTH 50;
@@ -25,9 +27,10 @@ isImported 'Imported from MBOX format' = DATA BOOLEAN (Mbox);
 wrongFormat 'Wrong file format' = DATA BOOLEAN (Mbox);
 
 // Counters
-length 'Number of lines' = DATA LONG (Mbox);
-messages 'Number of messages' = DATA INTEGER (Mbox);
-progress 'Imported lines' = DATA LONG (Mbox);
+length 'Lines' = DATA LONG (Mbox);
+messages 'Messages' = DATA INTEGER (Mbox);
+progress 'Imported Lines' = DATA LONG (Mbox);
+status 'Import Status' (Mbox m) = (OVERRIDE LONG ((length(m) * 100) / progress(m)), 0) + '%' CHARWIDTH 6;
 
 // Aggregating flag
 numberToImport 'MBOX archives at import' = GROUP SUM 1 IF toImport(Mbox v) AND NOT isImported(v);
@@ -45,14 +48,17 @@ TABLE mboxlog(MboxLog);
 mbox 'Mbox file' = DATA Mbox (MboxLog);
 email 'Account' (MboxLog l) = email(mbox(l));
 filname 'Filename' (MboxLog l) = filename(mbox(l));
+size 'Bytes in source' (MboxLog l) = size(mbox(l));
 length 'Lines in source' (MboxLog l) = length(mbox(l));
 messages 'Messages in source' (MboxLog l) = messages(mbox(l));
 start 'Date/Time Start' = DATA DATETIME (MboxLog);
+imported 'Date/Time Imported' = DATA DATETIME (MboxLog);
 finish 'Date/Time Finish' = DATA DATETIME (MboxLog);
 result 'Result' = DATA STRING[10] (MboxLog);
 output 'Output of the run' = DATA TEXT (MboxLog);
 lines 'Lines read' = DATA LONG (MboxLog);
 added 'Messages added' = DATA INTEGER (MboxLog);
+read 'Emails extracted' = DATA INTEGER (MboxLog);
 
 // Actions
 WHEN SET (isImported(Mbox v)) DO {
@@ -129,7 +135,7 @@ uploadFile 'Upload a new MBOX file' () {
 EXTEND FORM folder
     OBJECTS v = Mbox
     PROPERTIES email(v)
-    PROPERTIES (v) READONLY filename, toImport, isImported, wrongFormat, length, progress, isHidden
+    PROPERTIES (v) READONLY filename, toImport, isImported, wrongFormat, size, length, progress, isHidden
     PROPERTIES TOOLBAR DRAW v checkManual(), deleteFile(v) GRID SHOWIF showDelete() // not implemented: uploadFile(), 
     FILTERGROUP mboxs
         FILTER 'Show files in MBOX format only' NOT wrongFormat(v) DEFAULT
@@ -146,7 +152,7 @@ DESIGN folder { pane {
 
 EXTEND FORM folders
     OBJECTS v = Mbox
-    PROPERTIES (v) READONLY filename, length, progress
+    PROPERTIES (v) READONLY filename, size, status
     FILTERS account(v) == a AND NOT isHidden(v)
     ORDERS filename(v)
 ;

@@ -112,7 +112,10 @@ public class HeaderReader extends InternalAction {
 
             value = MimeUtility.decodeText(value);
 
-        } catch (UnsupportedEncodingException e) {
+        // In this Application we do not parse attachments, so we don't care for bad filenames here
+        // in tests java.lang.NullPointerException was captured here
+        //} catch (UnsupportedEncodingException e) {
+        } catch (Exception e) {
             value = "attachment.txt";
         }
 
