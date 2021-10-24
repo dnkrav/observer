@@ -33,6 +33,7 @@ checkDirectory (STRING dir) {
 }
 
 // Scroll Bar for large textual fileds
+// @ToDo Fix jump in horizontal scroll
 META scrollBarView(form, pane, property, captionText)
     DESIGN form { pane {        
         NEW desc###property {

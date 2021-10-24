@@ -22,7 +22,6 @@ import lsfusion.server.logics.classes.data.time.DateTimeConverter;
 import lsfusion.server.logics.classes.user.ConcreteCustomClass;
 import lsfusion.server.logics.property.classes.ClassPropertyInterface;
 import lsfusion.server.physics.admin.log.ServerLoggers;
-import lsfusion.server.physics.dev.integration.external.to.mail.EmailReceiver;
 import lsfusion.server.physics.dev.integration.internal.to.InternalAction;
 import org.apache.http.entity.ContentType;
 import org.apache.poi.hmef.Attachment;
@@ -68,7 +67,7 @@ public class HeaderReader extends InternalAction {
         }
     }
 
-    public LocalDateTime getReceivedDate(ExecutionContext<ClassPropertyInterface> context, DataObject commandArgs)
+    private LocalDateTime getReceivedDate(ExecutionContext<ClassPropertyInterface> context, DataObject commandArgs)
             throws ScriptingErrorLog.SemanticErrorException, SQLException, SQLHandledException {
         String received = (String) LM.findProperty("timestamp[Itemail]").
                 readClasses(context, commandArgs).getValue();
@@ -300,7 +299,7 @@ public class HeaderReader extends InternalAction {
         return messageEmail;
     }
 
-    public boolean importEmail(ExecutionContext<ClassPropertyInterface> context,
+    private boolean importEmail(ExecutionContext<ClassPropertyInterface> context,
                                DataObject commandArgs, MimeMessage data)
             throws IOException, ScriptingErrorLog.SemanticErrorException, SQLException, SQLHandledException {
         // Create new object and store it in the database within a separate session
@@ -350,14 +349,7 @@ public class HeaderReader extends InternalAction {
 
             // The parsed attachments from the MultipartBody are being dropped in order to keep the database smaller
             // once needed, the functionality may be forked from the EmailReceiver.importAttachments routine of lsFusion
-            // so far, the attachments data are available in EML export either in the item message from the mbox archive
-            // @ToDo create dynamic export for the EML format
-
-            // Binary file
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            data.writeTo(out);
-            LM.findProperty("emlFile[Email]").change(
-                    new FileData(new RawFileData(out), "eml"), emailContext, emailObject);
+            // so far, the attachments data are available in EML export (exportEMLFile function)
 
             return emailContext.apply();
         }

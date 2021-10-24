@@ -147,5 +147,6 @@ DESIGN parameters { pane {
 }}
 
 EXTEND FORM folders
-    PROPERTIES (m) SHOWIF NOT converted(m) TOOLBAR headerReader
+    PROPERTIES (m) SHOWIF NOT converted(m) TOOLBAR headerReader 
 ;
+DESIGN folders { TOOLBAR(m) { MOVE PROPERTY (headerReader(m)) FIRST; }}
