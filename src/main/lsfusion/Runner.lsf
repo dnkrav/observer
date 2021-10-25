@@ -35,10 +35,10 @@ importNextFile 'Import from next MBOX archive' () {
         RETURN;
     }
     
-    IF lastImporterResult() != 'Success' THEN {
-        printToLog('Import was not started, because the last Import Result requires action of the Admininstrator');
-        RETURN;
-    }
+    //IF lastImporterResult() != 'Success' THEN {
+    //    printToLog('Import was not started, because the last Import Result requires action of the Admininstrator');
+    //    RETURN;
+    //}
     
     NEWSESSION { 
         lastImporterResult() <- 'Stop';
@@ -73,6 +73,7 @@ importNextFile 'Import from next MBOX archive' () {
             output(l) <- CONCAT '\n', output(l), (OVERRIDE lastImporterOutput(), '');
         }
         CATCH {
+            // We are here in case of e.g. java.lang.OutOfMemoryError: Java heap space
             printToLog('Import Run ended with exception: ' + messageCaughtException());
             output(l) <- CONCAT '\n', output(l), (OVERRIDE messageCaughtException(), '');
         }
