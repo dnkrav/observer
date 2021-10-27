@@ -114,7 +114,8 @@ importNextFile 'Import from next MBOX archive' () {
 // Process monitor
 FORM importer 'MBOX Import'
     OBJECTS m = Mbox
-    PROPERTIES (m) filename, path, toImport, isImported, wrongFormat, size, length, progress, messages, imported, emails
+    PROPERTIES (m) filename READONLY, path READONLY, toImport, isImported, wrongFormat
+    PROPERTIES (m) READONLY email, size, length, progress, messages, imported, emails
     
     OBJECTS l = MboxLog
     PROPERTIES (l) READONLY start, imported, finish, result, email, filname, size, length, messages, lines, added, read

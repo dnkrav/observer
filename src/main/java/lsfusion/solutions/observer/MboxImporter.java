@@ -9,6 +9,7 @@ import lsfusion.server.logics.action.controller.context.ExecutionContext;
 import lsfusion.server.logics.classes.ValueClass;
 import lsfusion.server.logics.classes.user.ConcreteCustomClass;
 import lsfusion.server.logics.property.classes.ClassPropertyInterface;
+import lsfusion.server.physics.admin.log.ServerLoggers;
 import lsfusion.server.physics.dev.integration.internal.to.InternalAction;
 import lsfusion.server.data.value.DataObject;
 
@@ -24,6 +25,9 @@ public class MboxImporter extends InternalAction {
 
     // Used to transfer parameters from the LSFusion module
     private final ClassPropertyInterface mboxInterface;
+
+    // From_ line tracking buffer
+    private FromLine fromLine = new FromLine();
 
     public MboxImporter(ScriptingLogicsModule LM, ValueClass... classes) {
         super(LM, classes);
@@ -72,7 +76,7 @@ public class MboxImporter extends InternalAction {
         try {
             count = (long) LM.findProperty("length[Mbox]").readClasses(context, commandArgs).getValue();
         } catch (NullPointerException emptyLength) {
-            long[] dims = this.countLines(fileLink);
+            long[] dims = countLines(fileLink);
             count = dims[1];
             // Store the file length
             try (ExecutionContext.NewSession<ClassPropertyInterface> itemContext = context.newSession()) {
@@ -91,7 +95,8 @@ public class MboxImporter extends InternalAction {
     }
 
     private boolean writeItem(ExecutionContext<ClassPropertyInterface> context, DataObject commandArgs,
-                              Itemail itemail, long progress) {
+                              Itemail itemail, long progress)
+            throws IOException {
         // Create new object and store it in the database within a separate session
         try (ExecutionContext.NewSession<ClassPropertyInterface> itemContext = context.newSession()) {
             DataObject itemObject = itemContext.addObject((ConcreteCustomClass) LM.findClass("Itemail"));
@@ -105,10 +110,14 @@ public class MboxImporter extends InternalAction {
             LM.findProperty("progress[Mbox]").change(progress, itemContext, commandArgs);
 
             return itemContext.apply();
-        }
-        catch (SQLException | SQLHandledException | ScriptingErrorLog.SemanticErrorException e) {
+        } catch (SQLException | SQLHandledException | ScriptingErrorLog.SemanticErrorException e) {
             // SQL access issues, don't stop file reading
             return false;
+        } catch (OutOfMemoryError e) {
+            // Monitor the memory overfilling
+            ServerLoggers.importLogger.error("Message item is too large for JVM memory of " +
+                    Runtime.getRuntime().maxMemory() + ". Occurred from " + itemail.addr);
+            throw new IOException("Message item is too large from: " + itemail.addr);
         }
     }
 
@@ -134,7 +143,6 @@ public class MboxImporter extends InternalAction {
             BufferedReader importer = new BufferedReader(filestream);
             String next;
             boolean confidence;
-            FromLine fromLine = new FromLine();
             Itemail itemail;
 
             // First run
@@ -160,6 +168,7 @@ public class MboxImporter extends InternalAction {
                     if (writeItem(context, commandArgs, itemail, number)) {
                         recorded++;
                     }
+
                     itemail = new Itemail(fromLine);
                 } else {
                     itemail.appendMessageLine(next);
@@ -187,8 +196,16 @@ public class MboxImporter extends InternalAction {
         }
         catch (IOException e)
         {
+            // This handling includes OutOfMemoryError exceptions from called routines
             LM.findProperty("lastImporterOutput").
                     change("Finished with IOException: " + e.toString(),context,commandArgs);
+        } catch (OutOfMemoryError e) {
+            // Monitor the memory overfilling
+            ServerLoggers.importLogger.error("BufferedReader position is too large for JVM memory of " +
+                    Runtime.getRuntime().maxMemory() + ". Occurred from " + fromLine.addr);
+            LM.findProperty("lastImporterOutput").
+                    change("At line from " + fromLine.addr + " finished with OutOfMemoryError: " + e.toString(),
+                            context,commandArgs);
         }
     }
 }

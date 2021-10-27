@@ -1,5 +1,8 @@
 package lsfusion.solutions.observer;
 
+import lsfusion.server.physics.admin.log.ServerLoggers;
+
+import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -45,10 +48,6 @@ import java.util.regex.Pattern;
 //      DIGIT   =       %x30-39  ; 0-9
 
 public class FromLine {
-    private transient Pattern fromLineRegex;
-    // Confidence check is added for reqular expression debugging
-    private transient Pattern candidateRegex;
-
     public String line;
     public transient String addr;
     public transient String date;
@@ -57,53 +56,60 @@ public class FromLine {
     public transient boolean confidence;
 
     public FromLine() {
-        String atextExpression = "[[a-zA-Z][0-9][+-][\\!\\#\\$\\%\\&\\'\\*\\/\\=\\?\\^\\_\\`\\{\\|\\}\\~]]*";
-        String dotAtomExpression = atextExpression + "\\.?" + atextExpression;
-
-        // Pick the only implementation via dot-atom
-        String localPartExpression = dotAtomExpression;
-        String domainExpression = dotAtomExpression;
-
-        String addrSpecExpression = "(" + localPartExpression + "@" + domainExpression + "|MAILER-DAEMON)";
-
-        String timestampExpression = "([a-zA-Z]{3}\\s[a-zA-Z]{3}\\s\\d{2}\\s\\d{2}:\\d{2}:\\d{2}\\s[+-]\\d{4}\\s\\d{4})";
-
-        String fromLineExpression = "From\\s" + addrSpecExpression + "\\s" + timestampExpression;
-
-        fromLineRegex = Pattern.compile(fromLineExpression);
-
-        candidateRegex = Pattern.compile("From\\s(.*[@|MAILER\\-DAEMON].*)\\s(.*)");
-
         isFromLine = false;
         confidence = true;
     }
 
-    public boolean checkFromLine(String line) {
+    public boolean checkFromLine(String line)
+            throws IOException {
         if (line == null) {
             return confidence;
         } else {
             this.line = line;
         }
 
-        Matcher candidateMatch = candidateRegex.matcher(line);
+        try {
+            String atextExpression = "[[a-zA-Z][0-9][+-][\\!\\#\\$\\%\\&\\'\\*\\/\\=\\?\\^\\_\\`\\{\\|\\}\\~]]*";
+            String dotAtomExpression = atextExpression + "\\.?" + atextExpression;
 
-        if (candidateMatch.matches()) {
-            isFromLine = true;
-            Matcher fromLineMatch = fromLineRegex.matcher(line);
-            if (fromLineMatch.matches()) {
-                confidence = true;
-                addr = fromLineMatch.group(1);
-                date = fromLineMatch.group(2);
+            // Pick the only implementation via dot-atom
+            String localPartExpression = dotAtomExpression;
+            String domainExpression = dotAtomExpression;
+
+            String addrSpecExpression = "(" + localPartExpression + "@" + domainExpression + "|MAILER-DAEMON)";
+
+            String timestampExpression = "([a-zA-Z]{3}\\s[a-zA-Z]{3}\\s\\d{2}\\s\\d{2}:\\d{2}:\\d{2}\\s[+-]\\d{4}\\s\\d{4})";
+
+            String fromLineExpression = "From\\s" + addrSpecExpression + "\\s" + timestampExpression;
+
+            Pattern fromLineRegex = Pattern.compile(fromLineExpression);
+            // Confidence check is added for reqular expression debugging
+            Pattern candidateRegex = Pattern.compile("From\\s(.*[@|MAILER\\-DAEMON].*)\\s(.*)");
+
+            Matcher candidateMatch = candidateRegex.matcher(line);
+
+            if (candidateMatch.matches()) {
+                isFromLine = true;
+                Matcher fromLineMatch = fromLineRegex.matcher(line);
+                if (fromLineMatch.matches()) {
+                    confidence = true;
+                    addr = fromLineMatch.group(1);
+                    date = fromLineMatch.group(2);
+                } else {
+                    confidence = false;
+                    addr = candidateMatch.group(1);
+                    date = candidateMatch.group(2);
+                }
             } else {
-                confidence = false;
-                addr = candidateMatch.group(1);
-                date = candidateMatch.group(2);
+                isFromLine = false;
+                confidence = true;
             }
-        } else {
-            isFromLine = false;
-            confidence = true;
+        } catch (OutOfMemoryError e) {
+            // Monitor the memory overfilling
+            ServerLoggers.importLogger.error("FromLine is too large for JVM memory of " +
+                    Runtime.getRuntime().maxMemory() + ". Occurred from " + line);
+            throw new IOException("FromLine is too large: " + line);
         }
-
         return confidence;
     }
 
