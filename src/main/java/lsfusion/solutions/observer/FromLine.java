@@ -63,7 +63,7 @@ public class FromLine {
     public boolean checkFromLine(String line)
             throws IOException {
         if (line == null) {
-            return confidence;
+            return isFromLine;
         } else {
             this.line = line;
         }
@@ -89,16 +89,15 @@ public class FromLine {
             Matcher candidateMatch = candidateRegex.matcher(line);
 
             if (candidateMatch.matches()) {
-                isFromLine = true;
                 Matcher fromLineMatch = fromLineRegex.matcher(line);
                 if (fromLineMatch.matches()) {
+                    isFromLine = true;
                     confidence = true;
                     addr = fromLineMatch.group(1);
                     date = fromLineMatch.group(2);
                 } else {
+                    isFromLine = false;
                     confidence = false;
-                    addr = candidateMatch.group(1);
-                    date = candidateMatch.group(2);
                 }
             } else {
                 isFromLine = false;
@@ -110,7 +109,7 @@ public class FromLine {
                     Runtime.getRuntime().maxMemory() + ". Occurred from " + line);
             throw new IOException("FromLine is too large: " + line);
         }
-        return confidence;
+        return isFromLine;
     }
 
     public String fromLine() {

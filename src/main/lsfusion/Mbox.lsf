@@ -28,7 +28,7 @@ wrongFormat 'Wrong file format' = DATA BOOLEAN (Mbox);
 
 // Counters
 length 'Lines' = DATA LONG (Mbox);
-messages 'Messages' = DATA INTEGER (Mbox);
+messages 'Messages' = DATA LONG (Mbox);
 progress 'Imported Lines' = DATA LONG (Mbox);
 status 'Import Status' (Mbox m) = (OVERRIDE LONG ((length(m) * 100) / progress(m)), 0) + '%' CHARWIDTH 6;
 

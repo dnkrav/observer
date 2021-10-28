@@ -62,11 +62,14 @@ importNextFile 'Import from next MBOX archive' () {
         mbox(l) <- m;
         start(l) <- currentDateTime();
         
+        LOCAL initialLines = INTEGER ();
         LOCAL initialImported = INTEGER ();
         LOCAL initialRead = INTEGER ();
-        initialImported() <- imported(m); 
-        initialRead() <- emails(m); 
+        initialLines() <- OVERRIDE progress(m), 0;
+        initialImported() <- OVERRIDE imported(m), 0; 
+        initialRead() <- OVERRIDE emails(m), 0; 
         output(l) <- 'Import initiated by: ' + (OVERRIDE name(currentUser()), 'System User');
+        output(l) <- CONCAT '\n', output(l), 'Current progress: ' + initialLines() + ' lines read';
         TRY {
             mboxImporter(m);
         
@@ -79,7 +82,7 @@ importNextFile 'Import from next MBOX archive' () {
         }
         
         result(l) <- lastImporterResult();
-        lines(l) <- progress(m);
+        lines(l) <- OVERRIDE (progress(m) - initialLines()), progress(m), 0;
         added(l) <- OVERRIDE (imported(m) - initialImported()), imported(m), 0;
         imported(l) <- currentDateTime();
         

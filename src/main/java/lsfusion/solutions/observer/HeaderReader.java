@@ -265,7 +265,7 @@ public class HeaderReader extends InternalAction {
         return new HeaderReader.MultipartBody(body, attachments);
     }
 
-    private HeaderReader.MultipartBody getMimeMessageContent(MimeMessage data)
+    private HeaderReader.MultipartBody getMimeMessageContent(MimeMessage data, String subjectText)
             throws IOException, MessagingException {
         // Possible types of the content object:
         // Object, meaning getContent from DataHandler
@@ -280,10 +280,10 @@ public class HeaderReader extends InternalAction {
         if (content instanceof Multipart) {
             // In case of mbox archive this selection is going to be MimeMultipart, which extends Multipart
             messageEmail = this.getMultipartBody(
-                    data.getSubject(), (Multipart)content);
+                    subjectText, (Multipart)content);
         } else if (content instanceof FilterInputStream) {
             messageEmail = this.getMultipartBodyStream(
-                    data.getSubject(), (FilterInputStream)content, this.decodeFileName(data.getFileName()));
+                    subjectText, (FilterInputStream)content, this.decodeFileName(data.getFileName()));
         } else if (content instanceof String) {
             // Mask the default value for type char
             messageEmail = new HeaderReader.MultipartBody(
@@ -296,7 +296,7 @@ public class HeaderReader extends InternalAction {
             messageEmail = new HeaderReader.MultipartBody(
                     content == null ? null : String.valueOf(content), (Map)null);
             ServerLoggers.mailLogger.error(
-                    "Warning: missing attachment '" + content + "' from email '" + data.getSubject() + "'");
+                    "Warning: missing attachment '" + content + "' from email '" + subjectText + "'");
         }
 
         return messageEmail;
@@ -305,6 +305,7 @@ public class HeaderReader extends InternalAction {
     private boolean importEmail(ExecutionContext<ClassPropertyInterface> context,
                                DataObject commandArgs, MimeMessage data)
             throws IOException, ScriptingErrorLog.SemanticErrorException, SQLException, SQLHandledException {
+        // @ToDo Process empty headers
         // Create new object and store it in the database within a separate session
         try (ExecutionContext.NewSession<ClassPropertyInterface> emailContext = context.newSession()) {
             DataObject emailObject = emailContext.addObject((ConcreteCustomClass) LM.findClass("Email"));
@@ -344,10 +345,11 @@ public class HeaderReader extends InternalAction {
             LM.findProperty("toAddress[Email]").change(recipients, emailContext, emailObject); //
 
             // Value from the header "Subject: "
-            LM.findProperty("subject[Email]").change(data.getSubject(), emailContext, emailObject);
+            String subjectText = data.getSubject() != null ? data.getSubject() : " ";
+            LM.findProperty("subject[Email]").change(subjectText, emailContext, emailObject);
 
             // Output from the textual content parsing
-            HeaderReader.MultipartBody messageContent = this.getMimeMessageContent(data);
+            HeaderReader.MultipartBody messageContent = this.getMimeMessageContent(data, subjectText);
             LM.findProperty("message[Email]").change(messageContent.message, emailContext, emailObject);
 
             // The parsed attachments from the MultipartBody are being dropped in order to keep the database smaller

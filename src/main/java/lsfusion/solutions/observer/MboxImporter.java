@@ -48,47 +48,48 @@ public class MboxImporter extends InternalAction {
         }
     }
 
-    private static long[] countLines(String fileLink)
+    private static long[] getFileSize(String fileLink)
             throws IOException {
-        long count = 0;
+        long linesCount = 0;
 
         FileInputStream fileInput = new FileInputStream(fileLink);
         InputStreamReader filestream = new InputStreamReader(fileInput, StandardCharsets.UTF_8);
         BufferedReader importer = new BufferedReader(filestream);
 
-        long length = fileInput.getChannel().size();
+        long size = fileInput.getChannel().size();
 
         while (importer.readLine() != null) {
-            count++;
+            linesCount++;
         }
 
         importer.close();
         filestream.close();
         fileInput.close();
 
-        return new long[]{length, count};
+        return new long[]{size, linesCount};
     }
 
-    private long countLines(ExecutionContext<ClassPropertyInterface> context, DataObject commandArgs,
+    private long[] countFileContent(ExecutionContext<ClassPropertyInterface> context, DataObject commandArgs,
                               String fileLink)
             throws IOException, ScriptingErrorLog.SemanticErrorException, SQLException, SQLHandledException {
-        long count;
+        long[] count = new long[] {0, 0, 0};
         try {
-            count = (long) LM.findProperty("length[Mbox]").readClasses(context, commandArgs).getValue();
+            count[0] = (long) LM.findProperty("length[Mbox]").readClasses(context, commandArgs).getValue();
+            count[1] = (long) LM.findProperty("progress[Mbox]").readClasses(context, commandArgs).getValue();
+            count[2] = (long) LM.findProperty("messages[Mbox]").readClasses(context, commandArgs).getValue();
         } catch (NullPointerException emptyLength) {
-            long[] dims = countLines(fileLink);
-            count = dims[1];
+            long[] dims = getFileSize(fileLink);
             // Store the file length
             try (ExecutionContext.NewSession<ClassPropertyInterface> itemContext = context.newSession()) {
                 LM.findProperty("size[Mbox]").change(dims[0], itemContext, commandArgs);
-                LM.findProperty("length[Mbox]").change(count, itemContext, commandArgs);
+                LM.findProperty("length[Mbox]").change(dims[1], itemContext, commandArgs);
                 itemContext.applyException();
+                count[0] = dims[1];
             }
             catch (ApplyCanceledException e) {
                 LM.findProperty("lastImporterOutput").
-                        change("Database Access: Cannot store file length of " + count + ": " + e.toString(),
+                        change("Database Access: Cannot store file length of " + count[0] + ": " + e.toString(),
                                 context,commandArgs);
-                return 0;
             }
         }
         return count;
@@ -128,11 +129,13 @@ public class MboxImporter extends InternalAction {
                     readClasses(context, commandArgs).getValue();
 
             // Initialize progress
-            if (this.countLines(context, commandArgs, fileLink) == 0) {
+            long[] count = this.countFileContent(context, commandArgs, fileLink);
+            if (count[0] == 0) {
+                // file size is undefined
                 return;
             }
             long number = 0;
-            int messages = 0;
+            long messages = 0;
             int recorded = 0;
 
             // Recognition of file content in UTF8
@@ -141,14 +144,20 @@ public class MboxImporter extends InternalAction {
 
             // Buffers for file content
             BufferedReader importer = new BufferedReader(filestream);
-            String next;
-            boolean confidence;
+            String next = " ";
+            boolean confidence = false;
             Itemail itemail;
 
-            // First run
-            next = importer.readLine();
-            confidence = fromLine.checkFromLine(next);
-            if (!confidence) {
+            // First run or skip previously read lines
+            while (number < count[1] && next != null) {
+                next = importer.readLine();
+                number++;
+            }
+            do {
+                next = importer.readLine();
+                number++;
+            } while (!fromLine.checkFromLine(next) && next != null);
+            if (next == null) {
                 throw new IOException("Wrong MBOX archive, doesn't starts from the From line");
             } else {
                 itemail = new Itemail(fromLine);
@@ -158,33 +167,32 @@ public class MboxImporter extends InternalAction {
             do {
                 // Splitting strings message by message
                 next = importer.readLine();
+                // 1-based number of currently read line
                 number++;
 
-                confidence = fromLine.checkFromLine(next);
-
                 // Single message processing
-                if (fromLine.isFromLine | next == null) {
+                if (fromLine.checkFromLine(next) || next == null) {
                     messages++;
-                    if (writeItem(context, commandArgs, itemail, number)) {
+                    // itemail contains now lines up to current exclusively
+                    if (writeItem(context, commandArgs, itemail, number-1)) {
                         recorded++;
                     }
-
                     itemail = new Itemail(fromLine);
                 } else {
                     itemail.appendMessageLine(next);
                 }
 
                 // Business logic exception made here, because we want the questionable item to be analyzed
-                if (!confidence) {
-                    LM.findProperty("lastImporterOutput").
-                            change("From Line parsing: regex match is not confident, check the last Message: " +
-                                    itemail.fromLine, context,commandArgs);
-                    return;
+                if (!fromLine.confidence) {
+                    // Logging strange parsing against the RFC format
+                    ServerLoggers.importLogger.debug(
+                            "Non-confident From line of message " + next);
                 }
             } while (next != null);
 
             // Success operation flags
-            LM.findProperty("messages[Mbox]").change(messages, context, commandArgs);
+            // @ToDo Chek this line execution
+            LM.findProperty("messages[Mbox]").change((long)(count[2] + messages), context, commandArgs);
             LM.findProperty("isImported[Mbox]").change(true, context, commandArgs);
             LM.findProperty("lastImporterResult").change("Success", context, commandArgs);
             LM.findProperty("lastImporterOutput").
