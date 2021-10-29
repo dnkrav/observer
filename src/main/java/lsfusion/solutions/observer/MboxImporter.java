@@ -69,15 +69,24 @@ public class MboxImporter extends InternalAction {
         return new long[]{size, linesCount};
     }
 
+    private long queryProgress(ExecutionContext<ClassPropertyInterface> context, DataObject obj, String parameter)
+            throws ScriptingErrorLog.SemanticErrorException, SQLException, SQLHandledException {
+        try {
+            return (long) LM.findProperty(parameter).readClasses(context, obj).getValue();
+        } catch (NullPointerException emptyValue) {
+            return 0;
+        }
+    }
+
     private long[] countFileContent(ExecutionContext<ClassPropertyInterface> context, DataObject commandArgs,
                               String fileLink)
             throws IOException, ScriptingErrorLog.SemanticErrorException, SQLException, SQLHandledException {
-        long[] count = new long[] {0, 0, 0};
-        try {
-            count[0] = (long) LM.findProperty("length[Mbox]").readClasses(context, commandArgs).getValue();
-            count[1] = (long) LM.findProperty("progress[Mbox]").readClasses(context, commandArgs).getValue();
-            count[2] = (long) LM.findProperty("messages[Mbox]").readClasses(context, commandArgs).getValue();
-        } catch (NullPointerException emptyLength) {
+        long[] count = new long[] {
+                this.queryProgress(context,commandArgs,"length[Mbox]"),
+                this.queryProgress(context,commandArgs,"progress[Mbox]"),
+                this.queryProgress(context,commandArgs,"bytes[Mbox]")
+        };
+        if (count[0] == 0) {
             long[] dims = getFileSize(fileLink);
             // Store the file length
             try (ExecutionContext.NewSession<ClassPropertyInterface> itemContext = context.newSession()) {
@@ -96,7 +105,7 @@ public class MboxImporter extends InternalAction {
     }
 
     private boolean writeItem(ExecutionContext<ClassPropertyInterface> context, DataObject commandArgs,
-                              Itemail itemail, long progress)
+                              Itemail itemail, long progress, long position)
             throws IOException {
         // Create new object and store it in the database within a separate session
         try (ExecutionContext.NewSession<ClassPropertyInterface> itemContext = context.newSession()) {
@@ -109,6 +118,7 @@ public class MboxImporter extends InternalAction {
             LM.findProperty("message[Itemail]").change(itemail.message(), itemContext, itemObject);
 
             LM.findProperty("progress[Mbox]").change(progress, itemContext, commandArgs);
+            LM.findProperty("bytes[Mbox]").change(position, itemContext, commandArgs);
 
             return itemContext.apply();
         } catch (SQLException | SQLHandledException | ScriptingErrorLog.SemanticErrorException e) {
@@ -135,7 +145,6 @@ public class MboxImporter extends InternalAction {
                 return;
             }
             long number = 0;
-            long messages = 0;
             int recorded = 0;
 
             // Recognition of file content in UTF8
@@ -143,20 +152,48 @@ public class MboxImporter extends InternalAction {
             InputStreamReader filestream = new InputStreamReader(fileInput, StandardCharsets.UTF_8);
 
             // Buffers for file content
-            BufferedReader importer = new BufferedReader(filestream);
+            // Buffer must be larger, than size of the From_ line
+            int defaultCharBufferSize = 8192;
+            BufferedReader importer = new BufferedReader(filestream, defaultCharBufferSize);
             String next = " ";
-            boolean confidence = false;
             Itemail itemail;
+            long position = fileInput.getChannel().position();
 
-            // First run or skip previously read lines
-            while (number < count[1] && next != null) {
-                next = importer.readLine();
-                number++;
+            // First run or skip previously read characters
+            // Position in encounted in bytes
+            // Buffer reads chars, Size of char is 2 bytes
+            // Position skip is given in bytes
+            // The jump is decreased by buffer for the next line after last message and another buffer for shift
+            // Plus extra buffer to cover EOL with confidence
+            //if (count[2] > (defaultCharBufferSize * 2 + 2)) {
+            //    long skip = count[2] / 2 - defaultCharBufferSize - 1;
+            if (count[2] > (defaultCharBufferSize * 2 * 2 + 8)) {
+                long skip = count[2] - defaultCharBufferSize * 4 - 8;
+                position = importer.skip(skip);
             }
+            if (position == 0) {
+                // @ToDo compare performance
+                while (number < count[1] && next != null) {
+                    next = importer.readLine();
+                    number++;
+                }
+            }
+            //position = fileInput.getChannel().position(); // for debug
             do {
                 next = importer.readLine();
                 number++;
             } while (!fromLine.checkFromLine(next) && next != null);
+            position = fileInput.getChannel().position();
+            // We must be here around the same position as at previous stop
+            if (count[2] > 0 && count[2] != position) {
+                // Wrong re-positioning
+                ServerLoggers.importLogger.warn(
+                        "Not precise in " + fileLink + " successful to byte " + position + " instead of " + count[2]);
+            }
+            if (count[2] > 0 && count[2] == position) {
+                ServerLoggers.importLogger.info("Repositioning in " + fileLink + " successful to byte " + position);
+            }
+            number = count[1] + 1;
             if (next == null) {
                 throw new IOException("Wrong MBOX archive, doesn't starts from the From line");
             } else {
@@ -172,9 +209,9 @@ public class MboxImporter extends InternalAction {
 
                 // Single message processing
                 if (fromLine.checkFromLine(next) || next == null) {
-                    messages++;
+                    position = fileInput.getChannel().position();
                     // itemail contains now lines up to current exclusively
-                    if (writeItem(context, commandArgs, itemail, number-1)) {
+                    if (writeItem(context, commandArgs, itemail, number-1, position)) {
                         recorded++;
                     }
                     itemail = new Itemail(fromLine);
@@ -185,18 +222,16 @@ public class MboxImporter extends InternalAction {
                 // Business logic exception made here, because we want the questionable item to be analyzed
                 if (!fromLine.confidence) {
                     // Logging strange parsing against the RFC format
-                    ServerLoggers.importLogger.debug(
+                    ServerLoggers.importLogger.warn(
                             "Non-confident From line of message " + next);
                 }
             } while (next != null);
 
             // Success operation flags
-            // @ToDo Chek this line execution
-            LM.findProperty("messages[Mbox]").change((long)(count[2] + messages), context, commandArgs);
             LM.findProperty("isImported[Mbox]").change(true, context, commandArgs);
             LM.findProperty("lastImporterResult").change("Success", context, commandArgs);
             LM.findProperty("lastImporterOutput").
-                    change("Found " + messages + " messages, recorded: " + recorded, context, commandArgs);
+                    change("Recorded " + recorded + " messages", context, commandArgs);
 
             importer.close();
             filestream.close();

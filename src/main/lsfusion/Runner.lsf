@@ -62,9 +62,11 @@ importNextFile 'Import from next MBOX archive' () {
         mbox(l) <- m;
         start(l) <- currentDateTime();
         
+        LOCAL initialBytes = INTEGER ();
         LOCAL initialLines = INTEGER ();
         LOCAL initialImported = INTEGER ();
         LOCAL initialRead = INTEGER ();
+        initialBytes() <- OVERRIDE bytes(m), 0;
         initialLines() <- OVERRIDE progress(m), 0;
         initialImported() <- OVERRIDE imported(m), 0; 
         initialRead() <- OVERRIDE emails(m), 0; 
@@ -82,6 +84,7 @@ importNextFile 'Import from next MBOX archive' () {
         }
         
         result(l) <- lastImporterResult();
+        bytes(l) <- OVERRIDE (bytes(m) - initialBytes()), bytes(m), 0;
         lines(l) <- OVERRIDE (progress(m) - initialLines()), progress(m), 0;
         added(l) <- OVERRIDE (imported(m) - initialImported()), imported(m), 0;
         imported(l) <- currentDateTime();
@@ -118,10 +121,10 @@ importNextFile 'Import from next MBOX archive' () {
 FORM importer 'MBOX Import'
     OBJECTS m = Mbox
     PROPERTIES (m) filename READONLY, path READONLY, toImport, isImported, wrongFormat
-    PROPERTIES (m) READONLY email, size, length, progress, messages, imported, emails
+    PROPERTIES (m) READONLY email, size, bytes, length, progress, imported, emails
     
     OBJECTS l = MboxLog
-    PROPERTIES (l) READONLY start, imported, finish, result, email, filname, size, length, messages, lines, added, read
+    PROPERTIES (l) READONLY start, imported, finish, result, email, filname, size, bytes, length, lines, added, read
     PROPERTIES (l) READONLY PANEL output
     
     PROPERTIES() PANEL isBlocked, importNextFile TOOLBAR DRAW m

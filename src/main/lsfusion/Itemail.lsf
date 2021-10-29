@@ -73,7 +73,7 @@ exportEMLFile '{email.open.eml.file.email}' (Email email)  { exportEMLFile(itema
 
 EXTEND FORM folders
     PROPERTIES (a) messages, emails
-    PROPERTIES (v) messages, emails
+    PROPERTIES (v) imported, emails
 
     OBJECTS m = Itemail
     PROPERTIES (m) READONLY envsender, timestamp, converted

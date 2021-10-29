@@ -27,8 +27,8 @@ isImported 'Imported from MBOX format' = DATA BOOLEAN (Mbox);
 wrongFormat 'Wrong file format' = DATA BOOLEAN (Mbox);
 
 // Counters
+bytes 'Bytes read' = DATA LONG (Mbox);
 length 'Lines' = DATA LONG (Mbox);
-messages 'Messages' = DATA LONG (Mbox);
 progress 'Imported Lines' = DATA LONG (Mbox);
 status 'Import Status' (Mbox m) = (OVERRIDE LONG ((length(m) * 100) / progress(m)), 0) + '%' CHARWIDTH 6;
 
@@ -50,12 +50,12 @@ email 'Account' (MboxLog l) = email(mbox(l));
 filname 'Filename' (MboxLog l) = filename(mbox(l));
 size 'Bytes in source' (MboxLog l) = size(mbox(l));
 length 'Lines in source' (MboxLog l) = length(mbox(l));
-messages 'Messages in source' (MboxLog l) = messages(mbox(l));
 start 'Date/Time Start' = DATA DATETIME (MboxLog);
 imported 'Date/Time Imported' = DATA DATETIME (MboxLog);
 finish 'Date/Time Finish' = DATA DATETIME (MboxLog);
 result 'Result' = DATA STRING[10] (MboxLog);
 output 'Output of the run' = DATA TEXT (MboxLog);
+bytes 'Bytes read' = DATA LONG (MboxLog);
 lines 'Lines read' = DATA LONG (MboxLog);
 added 'Messages added' = DATA INTEGER (MboxLog);
 read 'Emails extracted' = DATA INTEGER (MboxLog);
