@@ -96,9 +96,9 @@ public class MboxImporter extends InternalAction {
                 count[0] = dims[1];
             }
             catch (ApplyCanceledException e) {
-                LM.findProperty("lastImporterOutput").
-                        change("Database Access: Cannot store file length of " + count[0] + ": " + e.toString(),
-                                context,commandArgs);
+                String warnMessage = "Database Access: Cannot store file length of " + count[0] + ": " + e.toString();
+                ServerLoggers.importLogger.warn(warnMessage);
+                LM.findProperty("lastImporterOutput").change(warnMessage, context, commandArgs);
             }
         }
         return count;
@@ -123,12 +123,12 @@ public class MboxImporter extends InternalAction {
             return itemContext.apply();
         } catch (SQLException | SQLHandledException | ScriptingErrorLog.SemanticErrorException e) {
             // SQL access issues, don't stop file reading
+            ServerLoggers.importLogger.warn("Cannot write message from MBOX " + itemail.addr + ": " + e.getMessage());
             return false;
         } catch (OutOfMemoryError e) {
             // Monitor the memory overfilling
-            ServerLoggers.importLogger.error("Message item is too large for JVM memory of " +
-                    Runtime.getRuntime().maxMemory() + ". Occurred from " + itemail.addr);
-            throw new IOException("Message item is too large from: " + itemail.addr);
+            throw new IOException("Message item is too large for JVM memory of " +
+                    Runtime.getRuntime().maxMemory() + ". Occurred from " + itemail.addr + " at " + position + " bytes");
         }
     }
 
@@ -195,7 +195,7 @@ public class MboxImporter extends InternalAction {
             }
             number = count[1] + 1;
             if (next == null) {
-                throw new IOException("Wrong MBOX archive, doesn't starts from the From line");
+                throw new IOException("Cannot find From_ line in MBOX archive");
             } else {
                 itemail = new Itemail(fromLine);
             }
@@ -211,7 +211,9 @@ public class MboxImporter extends InternalAction {
                 if (fromLine.checkFromLine(next) || next == null) {
                     position = fileInput.getChannel().position();
                     // itemail contains now lines up to current exclusively
-                    if (writeItem(context, commandArgs, itemail, number-1, position)) {
+                    if (this.writeItem(context, commandArgs, itemail, number-1, position)) {
+                        ServerLoggers.importLogger.info(
+                                "Successfully imported message from MBOX " + itemail.addr + " at " + position);
                         recorded++;
                     }
                     itemail = new Itemail(fromLine);
@@ -230,8 +232,8 @@ public class MboxImporter extends InternalAction {
             // Success operation flags
             LM.findProperty("isImported[Mbox]").change(true, context, commandArgs);
             LM.findProperty("lastImporterResult").change("Success", context, commandArgs);
-            LM.findProperty("lastImporterOutput").
-                    change("Recorded " + recorded + " messages", context, commandArgs);
+            LM.findProperty("lastImporterOutput").change(
+                    "Read " + position + " bytes, recorded " + recorded + " messages", context, commandArgs);
 
             importer.close();
             filestream.close();
@@ -240,6 +242,7 @@ public class MboxImporter extends InternalAction {
         catch (IOException e)
         {
             // This handling includes OutOfMemoryError exceptions from called routines
+            ServerLoggers.importLogger.error(e.getMessage());
             LM.findProperty("lastImporterOutput").
                     change("Finished with IOException: " + e.toString(),context,commandArgs);
         } catch (OutOfMemoryError e) {
