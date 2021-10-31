@@ -1,0 +1,38 @@
+# Forked from https://docs.lsfusion.org/Execution_manual/
+# Update absolute paths accordingly to the server configuration
+
+[Unit]
+Description=lsFusion
+After=network.target
+
+[Service]
+User=lsfusion
+Type=forking
+Environment="JAVA_HOME=/opt/java"
+# Minimum memorz limit for this application is -Xmx2g
+Environment="LSFUSION_OPTS=-Xms1g -Xmx4g"
+Environment="PID_FILE=/opt/lsfusion/jsvc-lsfusion.pid"
+Environment="CLASSPATH=.:server.jar"
+
+# On Debian/Ubuntu consider to compile the Apache Commons Daemon (jsvc) from sources,
+# because the version from distrib repo might be absolete
+# see for details: https://commons.apache.org/proper/commons-daemon/jsvc.html
+ExecStart=/opt/bin/jsvc \
+        -home $JAVA_HOME \
+        -jvm server \
+        -cwd $LSFUSION_HOME \
+        -pidfile $PID_FILE \
+        -outfile ${LSFUSION_HOME}/logs/stdout.log \
+        -errfile ${LSFUSION_HOME}/logs/stderr.log \
+        -cp ${LSFUSION_HOME}/${CLASSPATH} \
+        $LSFUSION_OPTS \
+        lsfusion.server.logics.BusinessLogicsBootstrap
+
+ExecStop=/opt/bin/jsvc \
+        -home $JAVA_HOME \
+        -stop \
+        -pidfile $PID_FILE \
+        lsfusion.server.logics.BusinessLogicsBootstrap
+
+[Install]
+WantedBy=multi-user.target
