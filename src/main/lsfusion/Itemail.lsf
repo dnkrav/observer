@@ -29,9 +29,10 @@ converted 'Converted into Email' = DATA DATETIME (Itemail);
 conversionError 'Error at conversion into Email' = DATA TEXT (Itemail);
 emails 'Emails' = GROUP SUM 1 BY mbox(itemail(Email m));
 emails 'Emails' = GROUP SUM 1 BY account(mbox(itemail(Email m)));
+account 'Account' (Email e) = email(mbox(itemail(e))) CHARWIDTH 20;
 // Extend Email default Class - drop limits for the address length
-from '{email.from.address.email}' = DATA STRING (Email);
-to '{email.to.address.email}' = DATA STRING (Email);
+from '{email.from.address.email}' = DATA STRING (Email) CHARWIDTH 20;
+to '{email.to.address.email}' = DATA STRING (Email) CHARWIDTH 60;
 
 // Headers
 from 'From' = DATA STRING (Itemail);

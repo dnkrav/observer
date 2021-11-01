@@ -2,7 +2,7 @@ MODULE Observer;
 // MBOX archives viewer
 
 REQUIRE Authentication, Scheduler, SystemEvents, Security, Backup, SQLUtils,
-        Config, Folder, Mbox, Itemail, Runner;
+        Config, Folder, Mbox, Itemail, Runner, Search;
 
 NAMESPACE Observer;
 

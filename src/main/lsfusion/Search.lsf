@@ -1,0 +1,206 @@
+MODULE Search;
+
+REQUIRE Itemail;
+
+NAMESPACE Observer;
+
+CLASS Search 'Search';
+TABLE search(Search);
+TABLE searchsecondary(Search, Search);
+TABLE searchmail(Search, Email);
+TABLE searchsecondarymail(Search, Search, Email);
+
+datetime 'Date / Time' = DATA DATETIME (Search);
+user 'User' = DATA CustomUser(Search);
+
+CLASS Key 'Keyword';
+TABLE key(Key);
+
+search 'Search' = DATA Search(Key);
+
+word 'Keyword' = DATA ISTRING (Key);
+keys 'Keywords' = GROUP SUM 1 BY search(Key k);
+
+in 'In' = DATA BOOLEAN (Search, Search);
+included 'Included into secondary search' = DATA DATETIME (Search, Search);
+secondary 'Amount of involved searches' (Search s) = GROUP SUM 1 IF in(s, Search sec);
+isWithin 'Within results' (Search s) = TRUE IF secondary(s) > 0 MATERIALIZED;
+highlight 'Background' (Search s, Search sec) = 
+    IF (datetime(sec) > included(s,sec) AND in(s,sec)) THEN RGB(255,0,0);
+
+conditionSearch 'Condition of this search' = 
+    GROUP CONCAT word(Key k), ' OR ' ORDER k BY search(k) MATERIALIZED;
+// use () only when more than one keyword in a secondary seach
+conditionSecondary 'Condition of search within result' (Search s) = GROUP 
+    CONCAT (IF keys(Search sec) > 1 THEN '(' + conditionSearch(sec) + ')' ELSE conditionSearch(sec)), ' AND ' 
+    IF in(s, sec) ORDER datetime(sec) MATERIALIZED;
+    
+condition 'Condition' (Search s) = OVERRIDE 
+    conditionSecondary(s) + ' AND ' + (IF keys(s) > 1 THEN '(' + conditionSearch(s) + ')' ELSE conditionSearch(s)), 
+    conditionSearch(s), 'Not defined - enter Keywords';
+
+in 'In' = DATA BOOLEAN (Search, Email);
+highlight 'Background' (Search s, Email e) = IF in(s,e) THEN RGB(0,255,0);
+selected 'Results selected' (Search s) = GROUP SUM 1 IF in(s, Email e) CHARWIDTH 15;
+
+inSec 'In secondary' (Search s, Search sec, Email e) = in(s, sec) AND in(sec, e);
+inSec 'In secondary' (Search s, Email e) = GROUP SUM 1 IF inSec(s, Search sec, e);
+
+scopeDefault 'Scope by default' = GROUP SUM 1 IF Email e IS Email;
+scopeSecondary 'Scope secondary' (Search s) = GROUP SUM 1 IF inSec(s, Email e) > 0;
+scope 'Searching scope' (Search s) = IF isWithin(s) THEN scopeSecondary(s) ELSE scopeDefault();
+
+matchKey 'Match Keyword' (Key k, Email e) = 
+    isISubstring(subject(e),word(k)) OR isISubstring(message(e),word(k));
+matchKeys 'Match Keywords' = GROUP SUM 1 IF matchKey(Key k, Email e) BY search(k), e;
+matchKeysWithin 'Match Keywords within' (Search s, Email e) = 
+    GROUP SUM 1 IF matchKey(Key k, e) AND search(k) == s AND inSec(s, e);
+matchSearch 'Match Search' (Search s, Email e) = 
+    IF isWithin(s) THEN matchKeysWithin(s,e) ELSE matchKeys(s,e);
+
+amount 'Results found' (Search s) = GROUP SUM 1 IF matchSearch(s, Email e) > 0 CHARWIDTH 7;
+
+CONSTRAINT isISubstring(word(Key k),' ') MESSAGE 'Keyword should not contain spaces';
+
+WHEN SETCHANGED (search(Key k)) DO {
+    LOCAL s = Search();
+    s() <- search(k);
+    IF s() THEN {
+        datetime(s()) <- currentDateTime();
+        user(s()) <- currentUser();
+    }
+}
+
+WHEN SET (in(Search s, Search sec)) DO {
+    included(s, sec) <- currentDateTime();
+}
+
+exportZip 'Export Search results into ZIP archive' (Search) {
+
+} TOOLBAR;
+
+FORM key 'Edit Keyword'
+    OBJECTS k = Key PANEL 
+    PROPERTIES (k) word
+    EDIT Key OBJECT k
+;
+
+DESIGN key {
+    size = (400,80);
+    NEW pane FIRST {
+        alignment = STRETCH;
+        fill = 1;
+        MOVE PROPERTY (word(k)) { 
+            caption = 'Letters or numbers, avoid spaces, case insensitive';
+            alignment = STRETCH; panelCaptionVertical = TRUE; 
+        }
+    }
+}
+
+addKey 'Add' (Search s) {
+    NEWSESSION {
+        NEW key = Key {
+            search(key) <- s;
+            SHOW key OBJECTS k = key FLOAT WAIT;
+        }
+    }
+} TOOLBAR;
+editKey 'Edit' (Key key) {
+    NEWSESSION {
+        SHOW key OBJECTS k = key FLOAT WAIT;
+    }
+} TOOLBAR;
+
+FORM search 'Search'
+    OBJECTS s = Search
+    PROPERTIES (s) READONLY datetime, isWithin, scope, selected
+    PROPERTIES (s) PANEL BACKGROUND RGB (255,255,0) condition, amount
+    PROPERTIES (s) NEW, DELETE, exportZip
+    
+    OBJECTS sec = Search
+    PROPERTIES in(s, sec)
+    PROPERTIES (sec) READONLY BACKGROUND highlight(s, sec) datetime, scope, selected, conditionSearch
+    FILTERS s != sec
+    
+    OBJECTS k = Key
+    PROPERTIES (k) ON CHANGE editKey(k) word
+    PROPERTIES TOOLBAR addKey(s) DRAW k, DELETE(k) NEWSESSION 
+    FILTERS search(k) == s
+    
+    OBJECTS e = Email
+    PROPERTIES DRAW e in(s, e), in(sec, e) SHOWIF isWithin(s)
+    PROPERTIES (e) READONLY BACKGROUND highlight(s, e) dateTimeReceived, account
+    PROPERTIES (e) READONLY PANEL to, from, subject, scrollEmail = message
+    PROPERTIES (e) PANEL exportEMLFile
+    FILTERS inSec(s, e) OR NOT isWithin(s),
+            matchSearch(s, e) > 0 OR NOT keys(s)
+    FILTERGROUP selected
+        FILTER 'Filter selected' in(s, e)
+;
+
+DESIGN search {
+    TOOLBAR {
+        MOVE PROPERTY (exportZip(s));
+    }
+    NEW pane FIRST {
+        type = CONTAINERV;
+        alignment = STRETCH;
+        fill = 1;
+        NEW key {
+            height = 200;
+            type = CONTAINERH;
+            alignment = STRETCH;
+            NEW boxS { 
+                width = 400; 
+                alignment = STRETCH;
+                MOVE BOX (s) {
+                    PROPERTY(isWithin(s)) {charWidth = 7;}
+                } 
+            }
+            NEW boxK { width = 400; alignment = STRETCH; MOVE BOX (k); }
+            MOVE BOX (sec) {
+                caption = 'Search within results';
+                PROPERTY (scope(sec)) { charWidth = 15; }
+                PROPERTY (selected(sec)) { charWidth = 15; }
+                PROPERTY (conditionSearch(sec)) {alignment = STRETCH;}
+            }
+        }
+        NEW stat {
+            type = CONTAINERH;
+            alignment = STRETCH;
+            NEW amount { width = 200; MOVE PROPERTY (amount(s)) { alignment = STRETCH; } }
+            MOVE PROPERTY (condition(s)) {alignment = STRETCH;}
+        }
+        NEW result {
+            alignment = STRETCH;
+            fill = 1;
+            type = CONTAINERH;
+            NEW list {
+                alignment = STRETCH;
+                width = 400;
+                MOVE BOX (e);
+            }
+            NEW message {
+                type = CONTAINERV;
+                fill = 3;
+                NEW header {
+                    type = CONTAINERH;
+                    alignment = STRETCH;
+                    MOVE PROPERTY (exportEMLFile(e)) {alignment = STRETCH;}
+                    MOVE PROPERTY (subject(e)) {alignment = STRETCH;}
+                }
+                NEW address {
+                    type = CONTAINERH;
+                    alignment = STRETCH;
+                    MOVE PROPERTY (from(e));
+                    MOVE PROPERTY (to(e)) {alignment = STRETCH;}
+                }
+            }
+        }
+    }
+}
+@scrollBarView(search, message, scrollEmail, 'Message');
+
+NAVIGATOR {
+    NEW search FIRST;
+}
