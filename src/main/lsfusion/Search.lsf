@@ -75,8 +75,16 @@ WHEN SET (in(Search s, Search sec)) DO {
     included(s, sec) <- currentDateTime();
 }
 
-exportZip 'Export Search results into ZIP archive' (Search) {
-
+exportZip 'Export selected Search results into ZIP archive' (Search s) {
+    zipping(STRING[100] eml) <- NULL;
+    FOR in(s, Email e) DO {
+        IF itemail(e) THEN {        
+            dynamicEML(itemail(e));
+            zipping(STRING[100] eml) <- emlFileExport(itemail(e)) WHERE eml == internalID(itemail(e)) + '.eml';
+        }
+    }
+    makeZipFile();
+    WRITE CLIENT DIALOG zipped() TO 'EMLselected_Search ' + condition(s);
 } TOOLBAR;
 
 FORM key 'Edit Keyword'
