@@ -4,19 +4,11 @@ REQUIRE Itemail;
 
 NAMESPACE Observer;
 
-// Block for single import process running
-isBlocked 'Import process is busy' () = DATA BOOLEAN ();
-
 // Import data from MBOX format
 mboxImporter 'Import data from MBOX archive' INTERNAL 'lsfusion.solutions.observer.MboxImporter' (Mbox);
 
 // Read MIME Headers
 headerReader 'Read MIME Headers' INTERNAL 'lsfusion.solutions.observer.HeaderReader' (Itemail);
-
-// Runner for MBOX import Scheduler
-lastImporterRun 'Name of the last processed MBOX archive' = DATA STRING ();
-lastImporterResult 'Result of the last run' = DATA STRING[10] ();
-lastImporterOutput 'Output from the last run' = DATA TEXT ();
 
 importNextFile 'Import from next MBOX archive' () {
     LOCAL nextFile = Mbox(); 
@@ -34,12 +26,7 @@ importNextFile 'Import from next MBOX archive' () {
         printToLog('Import is blocked by another process');
         RETURN;
     }
-    
-    //IF lastImporterResult() != 'Success' THEN {
-    //    printToLog('Import was not started, because the last Import Result requires action of the Admininstrator');
-    //    RETURN;
-    //}
-    
+
     NEWSESSION { 
         lastImporterResult() <- 'Stop';
         lastImporterOutput() <- NULL;

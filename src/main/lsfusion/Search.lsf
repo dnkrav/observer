@@ -11,16 +11,36 @@ TABLE searchmail(Search, Email);
 TABLE searchsecondarymail(Search, Search, Email);
 
 datetime 'Date / Time' = DATA DATETIME (Search);
+start 'Start' = DATA DATETIME (Search);
+apply 'Applied' = DATA DATETIME (Search);
 user 'User' = DATA CustomUser(Search);
+found 'Found Matches' = DATA INTEGER (Search);
+status 'Need Processing' = DATA BOOLEAN (Search);
+highlight 'Background' (Search s) = IF status(s) THEN RGB(255,0,0);
 
 CLASS Key 'Keyword';
 TABLE key(Key);
+TABLE keymail(Key,Email);
 
 search 'Search' = DATA Search(Key);
 
-word 'Keyword' = DATA ISTRING (Key);
+word 'Keyword' = DATA STRING (Key);
+updated 'Keyword' = DATA DATETIME (Key);
+start 'Start' = DATA DATETIME (Key);
+apply 'Applied' = DATA DATETIME (Key);
+found 'Found Matches' = DATA INTEGER (Key);
+highlight 'Background' (Key k) = IF updated(k) > apply(k) THEN RGB(255,0,0);
+
 keys 'Keywords' = GROUP SUM 1 BY search(Key k);
 
+// Instrument to mark the Search results
+// Small optimization considering that we control the key to be in lower case at input
+isLowerSubstring = FORMULA NULL BOOLEAN PG 'CASE WHEN position($2 in lower($1)) > 0 THEN 1 ELSE NULL END';
+// If pattern already found in the Subject field, then skip the message parsing
+matchKey 'Match Keyword' (Key k, Email e) = 
+    OVERRIDE isLowerSubstring(message(e),word(k)), isLowerSubstring(subject(e),word(k));
+
+// Complex criteria
 in 'In' = DATA BOOLEAN (Search, Search);
 included 'Included into secondary search' = DATA DATETIME (Search, Search);
 secondary 'Amount of involved searches' (Search s) = GROUP SUM 1 IF in(s, Search sec);
@@ -39,36 +59,117 @@ condition 'Condition' (Search s) = OVERRIDE
     conditionSecondary(s) + ' AND ' + (IF keys(s) > 1 THEN '(' + conditionSearch(s) + ')' ELSE conditionSearch(s)), 
     conditionSearch(s), 'Not defined - enter Keywords';
 
-in 'In' = DATA BOOLEAN (Search, Email);
-highlight 'Background' (Search s, Email e) = IF in(s,e) THEN RGB(0,255,0);
-selected 'Results selected' (Search s) = GROUP SUM 1 IF in(s, Email e) CHARWIDTH 15;
+// Handle matches
 
-inSec 'In secondary' (Search s, Search sec, Email e) = in(s, sec) AND in(sec, e);
-inSec 'In secondary' (Search s, Email e) = GROUP SUM 1 IF inSec(s, Search sec, e);
+// Scheduler Runner
+in 'In' = DATA BOOLEAN (Key, Email) INDEXED;
+found 'Found' = GROUP LAST in(Key k, Email e) ORDER in(k,e) BY search(k), e MATERIALIZED;
 
-scopeDefault 'Scope by default' = GROUP SUM 1 IF Email e IS Email;
-scopeSecondary 'Scope secondary' (Search s) = GROUP SUM 1 IF inSec(s, Email e) > 0;
+// Manual Selection
+select 'In' = DATA BOOLEAN (Search, Email) INDEXED;
+
+// Calculated metrics used for controlled materialization
+foundCalc 'Found Matches' (Key k) = GROUP SUM 1 IF in(k, Email e);
+foundCalc 'Found Matches' (Search s) = GROUP SUM 1 IF found(s, Email e);
+selectedCalc 'Results selected' (Search s) = GROUP SUM 1 IF select(s, Email e) CHARWIDTH 15;
+highlight 'Background' (Search s, Email e) = IF select(s,e) THEN RGB(0,255,0);
+
+// Complex Search
+inSec 'In secondary' (Search s, Search sec, Email e) = in(s, sec) AND select(sec, e);
+selectSec 'In secondary' (Search s, Email e) = GROUP SUM 1 IF inSec(s, Search sec, e);
+
+scopeDefault 'Scope by default' = GROUP SUM 1 IF Email e IS Email AND itemail(e);
+scopeSecondary 'Scope secondary' (Search s) = GROUP SUM 1 IF selectSec(s, Email e) > 0;
 scope 'Searching scope' (Search s) = IF isWithin(s) THEN scopeSecondary(s) ELSE scopeDefault();
 
-matchKey 'Match Keyword' (Key k, Email e) = 
-    isISubstring(subject(e),word(k)) OR isISubstring(message(e),word(k));
+markAllMatches 'Mark All matches to install Search' (Key k) {
+    NEWSESSION {
+        start(k) <- currentDateTime();
+        in(k, Email e) <- NULL;
+        APPLY;
+    }
+    NEWSESSION {
+        in(k, Email e) <- TRUE WHERE matchKey(k,e);
+        apply(k) <- currentDateTime();
+        APPLY;
+    }
+    NEWSESSION {
+        // Controlled materialization
+        found(k) <- foundCalc(k);
+        apply(k) <- currentDateTime();
+        APPLY;
+    }
+} TOOLBAR;
+
+markAllMatches 'Mark All matches to install Search' (Search s) {
+    NEWSESSION {
+        start(s) <- currentDateTime();
+        APPLY;
+    }
+    FOR Key k IF search(k) == s AND (updated(k) > apply(k) OR NOT apply(k)) DO {
+        markAllMatches(k);
+    }
+    NEWSESSION {
+        // Controlled materialization
+        found(s) <- foundCalc(s);
+        apply(s) <- currentDateTime();
+        status(s) <- NULL;
+        APPLY;
+    }
+} TOOLBAR;
+
+// Scheduler
+markNextSearch 'Mark Next Search' () {
+    LOCAL nextSearch = Search(); 
+    nextSearch() <- GROUP LAST Search s IF status(s) ORDER datetime(s);
+    
+    IF NOT nextSearch() THEN RETURN;
+    IF NOT condition(nextSearch()) THEN RETURN;
+    
+    IF isBlocked() THEN {
+        printToLog('Scheduler is blocked by another process');
+        RETURN;
+    }
+    
+    NEWSESSION { 
+        isBlocked() <- TRUE; 
+        APPLY; 
+    }
+    
+    printToLog('Start apply of Search pattern: ' + condition(nextSearch()));
+    
+    TRY {
+        markAllMatches(nextSearch());
+    } CATCH {
+        // We are here in case of e.g. java.lang.OutOfMemoryError: Java heap space
+        printToLog('Search pattern ended with exception: ' + messageCaughtException());
+    }
+    
+    printToLog('Stop apply of Search pattern: ' + condition(nextSearch()));
+    isBlocked() <- NULL;
+    APPLY;
+} TOOLBAR;
+
+// These calculated properties have too big complexity and should not be used on big datasets
+// Rely on the written flags as declared above then
 matchKeys 'Match Keywords' = GROUP SUM 1 IF matchKey(Key k, Email e) BY search(k), e;
 matchKeysWithin 'Match Keywords within' (Search s, Email e) = 
-    GROUP SUM 1 IF matchKey(Key k, e) AND search(k) == s AND inSec(s, e);
+    GROUP SUM 1 IF matchKey(Key k, e) AND search(k) == s AND selectSec(s, e);
 matchSearch 'Match Search' (Search s, Email e) = 
     IF isWithin(s) THEN matchKeysWithin(s,e) ELSE matchKeys(s,e);
-
 amount 'Results found' (Search s) = GROUP SUM 1 IF matchSearch(s, Email e) > 0 CHARWIDTH 7;
 
-CONSTRAINT isISubstring(word(Key k),' ') MESSAGE 'Keyword should not contain spaces';
+WHEN SETCHANGED (word(Key k)) DO {
+    updated(k) <- currentDateTime();
+    datetime(search(k)) <- updated(k);
+    user(search(k)) <- currentUser();
+    status(search(k)) <- TRUE;
+}
 
 WHEN SETCHANGED (search(Key k)) DO {
-    LOCAL s = Search();
-    s() <- search(k);
-    IF s() THEN {
-        datetime(s()) <- currentDateTime();
-        user(s()) <- currentUser();
-    }
+    datetime(search(k)) <- currentDateTime();
+    user(search(k)) <- currentUser();
+    status(search(k)) <- TRUE;
 }
 
 WHEN SET (in(Search s, Search sec)) DO {
@@ -77,7 +178,7 @@ WHEN SET (in(Search s, Search sec)) DO {
 
 exportZip 'Export selected Search results into ZIP archive' (Search s) {
     zipping(STRING[100] eml) <- NULL;
-    FOR in(s, Email e) DO {
+    FOR select(s, Email e) DO {
         IF itemail(e) THEN {        
             dynamicEML(itemail(e));
             zipping(STRING[100] eml) <- emlFileExport(itemail(e)) WHERE eml == internalID(itemail(e)) + '.eml';
@@ -87,9 +188,15 @@ exportZip 'Export selected Search results into ZIP archive' (Search s) {
     WRITE CLIENT DIALOG zipped() TO 'EMLselected_Search ' + condition(s);
 } TOOLBAR;
 
+// Editing Form
+pushToLowerCase 'Push to lower case' (Key k) { 
+    INPUT s = ISTRING DO {
+        word(k) <- ISTRING (lower(s));
+    }
+}
 FORM key 'Edit Keyword'
     OBJECTS k = Key PANEL 
-    PROPERTIES (k) word
+    PROPERTIES (k) ON CHANGE pushToLowerCase(k) word
     EDIT Key OBJECT k
 ;
 
@@ -113,40 +220,93 @@ addKey 'Add' (Search s) {
         }
     }
 } TOOLBAR;
+
 editKey 'Edit' (Key key) {
     NEWSESSION {
         SHOW key OBJECTS k = key FLOAT WAIT;
     }
 } TOOLBAR;
 
-FORM search 'Search'
+// Forms
+
+FORM search 'Install Search'
+    PROPERTIES markNextSearch()
+    
     OBJECTS s = Search
-    PROPERTIES (s) READONLY datetime, isWithin, scope, selected
-    PROPERTIES (s) PANEL BACKGROUND RGB (255,255,0) condition, amount
+    PROPERTIES (s) READONLY BACKGROUND highlight(s) datetime, isWithin, start, apply, found
+    PROPERTIES (s) BACKGROUND RGB (255,255,0) condition
     PROPERTIES (s) NEW, DELETE, exportZip
     
     OBJECTS sec = Search
     PROPERTIES in(s, sec)
-    PROPERTIES (sec) READONLY BACKGROUND highlight(s, sec) datetime, scope, selected, conditionSearch
+    PROPERTIES (sec) READONLY BACKGROUND highlight(s, sec) datetime, start, apply, found, conditionSearch
     FILTERS s != sec
     
     OBJECTS k = Key
-    PROPERTIES (k) ON CHANGE editKey(k) word
+    PROPERTIES (k) ON CHANGE editKey(k) BACKGROUND highlight(k) word, updated, start, apply, found
+    PROPERTIES TOOLBAR addKey(s) DRAW k, DELETE(k) NEWSESSION 
+    FILTERS search(k) == s
+;
+
+DESIGN search {
+    TOOLBAR {
+        MOVE PROPERTY (exportZip(s));
+    }
+    NEW pane FIRST {
+        type = CONTAINERV;
+        alignment = STRETCH;
+        fill = 1;
+        NEW boxS { 
+            alignment = STRETCH;
+            fill = 1;
+            MOVE BOX (s) {
+                PROPERTY(isWithin(s)) {charWidth = 7;}
+            } 
+        }
+        MOVE BOX (sec) {
+            caption = 'Search within results';
+            alignment = STRETCH;
+            fill = 1;
+            PROPERTY (conditionSearch(sec)) {alignment = STRETCH;}
+        }
+        NEW boxK { 
+            caption = 'Keywords for the selected primary Search';
+            alignment = STRETCH; 
+            fill = 3; 
+            MOVE BOX (k); 
+        }
+    }
+}
+
+FORM searches 'Search'
+    OBJECTS s = Search
+    PROPERTIES (s) READONLY BACKGROUND highlight(s) datetime, isWithin, found
+    PROPERTIES (s) PANEL condition BACKGROUND RGB (255,255,0), markAllMatches
+    PROPERTIES (s) NEW, DELETE, exportZip
+    
+    OBJECTS sec = Search
+    PROPERTIES in(s, sec)
+    PROPERTIES (sec) READONLY BACKGROUND highlight(s, sec) datetime, found, conditionSearch
+    FILTERS s != sec
+    
+    OBJECTS k = Key
+    PROPERTIES (k) BACKGROUND highlight(k) word ON CHANGE editKey(k), found
     PROPERTIES TOOLBAR addKey(s) DRAW k, DELETE(k) NEWSESSION 
     FILTERS search(k) == s
     
     OBJECTS e = Email
-    PROPERTIES DRAW e in(s, e), in(sec, e) SHOWIF isWithin(s)
+    PROPERTIES DRAW e select(s, e), select(sec, e) SHOWIF isWithin(s), in(k,e)
     PROPERTIES (e) READONLY BACKGROUND highlight(s, e) dateTimeReceived, account
     PROPERTIES (e) READONLY PANEL to, from, subject, scrollEmail = message
     PROPERTIES (e) PANEL exportEMLFile
-    FILTERS inSec(s, e) OR NOT isWithin(s),
-            matchSearch(s, e) > 0 OR NOT keys(s)
-    FILTERGROUP selected
-        FILTER 'Filter selected' in(s, e)
+    FILTERGROUP found
+        FILTER 'Filter Found' found(s, e) DEFAULT 
+        FILTER 'Filter Secondary' selectSec(s, e)
+        FILTER 'Filter Complex' found(s, e) AND selectSec(s, e)
+        FILTER 'Filter Selected' select(s, e)
 ;
 
-DESIGN search {
+DESIGN searches {
     TOOLBAR {
         MOVE PROPERTY (exportZip(s));
     }
@@ -168,15 +328,13 @@ DESIGN search {
             NEW boxK { width = 400; alignment = STRETCH; MOVE BOX (k); }
             MOVE BOX (sec) {
                 caption = 'Search within results';
-                PROPERTY (scope(sec)) { charWidth = 15; }
-                PROPERTY (selected(sec)) { charWidth = 15; }
                 PROPERTY (conditionSearch(sec)) {alignment = STRETCH;}
             }
         }
         NEW stat {
             type = CONTAINERH;
             alignment = STRETCH;
-            NEW amount { width = 200; MOVE PROPERTY (amount(s)) { alignment = STRETCH; } }
+            MOVE PROPERTY (markAllMatches(s));
             MOVE PROPERTY (condition(s)) {alignment = STRETCH;}
         }
         NEW result {
@@ -207,8 +365,11 @@ DESIGN search {
         }
     }
 }
-@scrollBarView(search, message, scrollEmail, 'Message');
+@scrollBarView(searches, message, scrollEmail, 'Message');
 
 NAVIGATOR {
-    NEW search FIRST;
+    NEW searches FIRST;
+    masterData {
+        NEW search AFTER parameters;
+    }
 }

@@ -51,6 +51,14 @@ META scrollBarView(form, pane, property, captionText)
     } }
 END 
 
+// Setup Scheduler
+// Block for single iCPU consumptive task
+isBlocked 'Scheduler is busy' () = DATA BOOLEAN ();
+// Scheduler output
+lastImporterRun 'Name of the last processed object' = DATA STRING ();
+lastImporterResult 'Result of the last run' = DATA STRING[10] ();
+lastImporterOutput 'Output from the last run' = DATA TEXT ();
+
 // Forms
 
 FORM storage 'Edit local storage'
