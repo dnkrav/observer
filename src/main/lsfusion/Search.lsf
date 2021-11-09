@@ -26,6 +26,8 @@ search 'Search' = DATA Search(Key);
 
 word 'Keyword' = DATA STRING (Key);
 isRegister 'Case Sensitive' = DATA BOOLEAN (Key);
+isWhole 'Whole Word' = DATA BOOLEAN (Key);
+whole 'Keyword for the whole word match' (Key k) = '\\m' + word(k) + '\\M' MATERIALIZED;
 updated 'Keyword' = DATA DATETIME (Key);
 start 'Start' = DATA DATETIME (Key);
 apply 'Applied' = DATA DATETIME (Key);
@@ -33,18 +35,6 @@ found 'Found Matches' = DATA INTEGER (Key);
 highlight 'Background' (Key k) = IF updated(k) > apply(k) THEN RGB(255,0,0);
 
 keys 'Keywords' = GROUP SUM 1 BY search(Key k);
-
-// Instrument to mark the Search results
-// Small optimization considering that we control the key to be in lower case at input
-isLowerSubstring = FORMULA NULL BOOLEAN PG 'CASE WHEN position($2 in lower($1)) > 0 THEN 1 ELSE NULL END';
-// If pattern already found in the Subject field, then skip the message parsing
-matchKey 'Match Keyword' (Key k, Email e) = 
-    OVERRIDE isLowerSubstring(message(e),word(k)), isLowerSubstring(subject(e),word(k));
-
-// Case Sensitive Search
-isRegisterSubstring = FORMULA NULL BOOLEAN PG 'CASE WHEN position($2 in $1) > 0 THEN 1 ELSE NULL END';
-matchRegisterKey 'Match Keyword Case Sensitive' (Key k, Email e) = 
-    OVERRIDE isRegisterSubstring(message(e),word(k)), isRegisterSubstring(subject(e),word(k));
 
 // Complex criteria
 in 'In' = DATA BOOLEAN (Search, Search);
@@ -88,6 +78,31 @@ scopeDefault 'Scope by default' = GROUP SUM 1 IF Email e IS Email AND itemail(e)
 scopeSecondary 'Scope secondary' (Search s) = GROUP SUM 1 IF selectSec(s, Email e) > 0;
 scope 'Searching scope' (Search s) = IF isWithin(s) THEN scopeSecondary(s) ELSE scopeDefault();
 
+// Instrument to mark the Search results
+// Small optimization considering that we control the key to be in lower case at input
+isLowerSubstring = FORMULA NULL BOOLEAN PG 'CASE WHEN position($2 in lower($1)) > 0 THEN 1 ELSE NULL END';
+// If pattern already found in the Subject field, then skip the message parsing
+matchKey 'Match Keyword' (Key k, Email e) = 
+    OVERRIDE isLowerSubstring(subject(e),word(k)), isLowerSubstring(message(e),word(k));
+
+// Case Sensitive Search
+isRegisterSubstring = FORMULA NULL BOOLEAN PG 'CASE WHEN position($2 in $1) > 0 THEN 1 ELSE NULL END';
+matchRegisterKey 'Match Keyword Case Sensitive' (Key k, Email e) = 
+    OVERRIDE isRegisterSubstring(subject(e),word(k)), isRegisterSubstring(message(e),word(k));
+
+// Regular Expression based Search, case insensitive
+// CASE WHEN is needed, because PG boolean returns true / false, while the platform has the only TRUE / NULL
+isWholeWordSubstring = FORMULA NULL BOOLEAN PG 'CASE WHEN $1 ~* $2 THEN 1 ELSE NULL END';
+matchWholeWordKey 'Match Whole Word Keyword' (Key k, Email e) = 
+    OVERRIDE isWholeWordSubstring(subject(e),whole(k)), isWholeWordSubstring(message(e),whole(k));
+
+// Regular Expression based Search, case sensitive
+//isWholeWordSubstring = FORMULA NULL BOOLEAN PG 'CASE WHEN substring($1 from $2) IS NOT NULL THEN 1 ELSE NULL END';
+isWholeWordRegisterSubstring = FORMULA NULL BOOLEAN PG 'CASE WHEN $1 ~ $2 THEN 1 ELSE NULL END';
+matchWholeWordRegisterKey 'Match Whole Word Keyword and Case Sensitive' (Key k, Email e) = 
+    OVERRIDE isWholeWordRegisterSubstring(subject(e),whole(k)), isWholeWordRegisterSubstring(message(e),whole(k));
+
+// Search Engine
 markAllMatches 'Mark All matches to install Search' (Key k) {
     NEWSESSION {
         start(k) <- currentDateTime();
@@ -95,11 +110,15 @@ markAllMatches 'Mark All matches to install Search' (Key k) {
         APPLY;
     }
     NEWSESSION {
-        IF isRegister(k) THEN {
-            in(k, Email e) <- TRUE WHERE matchRegisterKey(k,e);
-        } ELSE {
-            in(k, Email e) <- TRUE WHERE matchKey(k,e);
-        }
+        CASE
+            WHEN NOT isRegister(k) AND NOT isWhole(k) THEN {
+                in(k, Email e) <- TRUE WHERE matchKey(k,e); }
+            WHEN     isRegister(k) AND NOT isWhole(k) THEN {
+                in(k, Email e) <- TRUE WHERE matchRegisterKey(k,e); }
+            WHEN NOT isRegister(k) AND     isWhole(k) THEN {
+                in(k, Email e) <- TRUE WHERE matchWholeWordKey(k,e); }
+            WHEN     isRegister(k) AND     isWhole(k) THEN {
+                in(k, Email e) <- TRUE WHERE matchWholeWordRegisterKey(k,e); }
         apply(k) <- currentDateTime();
         APPLY;
     }
@@ -169,7 +188,7 @@ matchSearch 'Match Search' (Search s, Email e) =
     IF isWithin(s) THEN matchKeysWithin(s,e) ELSE matchKeys(s,e);
 amount 'Results found' (Search s) = GROUP SUM 1 IF matchSearch(s, Email e) > 0 CHARWIDTH 7;
 
-WHEN SETCHANGED (word(Key k)) OR SETDROPPED (isRegister(k)) OR SETCHANGED (search(k)) DO {
+WHEN SETCHANGED (word(Key k)) OR SETDROPPED (isRegister(k)) OR SETDROPPED (isWhole(k)) OR SETCHANGED (search(k)) DO {
     updated(k) <- currentDateTime();
     datetime(search(k)) <- updated(k);
     user(search(k)) <- currentUser();
@@ -182,15 +201,11 @@ WHEN SETDROPPED (isRegister(Key k)) DO {
     }
 }
 
-//WHEN SETCHANGED (search(Key k)) DO {
-//    datetime(search(k)) <- currentDateTime();
-//    user(search(k)) <- currentUser();
-//    status(search(k)) <- TRUE;
-//}
-
 WHEN SET (in(Search s, Search sec)) DO {
     included(s, sec) <- currentDateTime();
 }
+
+CONSTRAINT isWhole(Key k) AND isSubstring(word(k),' ') MESSAGE 'Whole Word criteria cannot contain spaces.';
 
 exportZip 'Export selected into ZIP archive' (Search s) {
     zipping(STRING[100] eml) <- NULL;
@@ -207,8 +222,13 @@ exportZip 'Export selected into ZIP archive' (Search s) {
 exportEML 'Export selected into EML files' (Search s) {
     FOR select(s, Email e) DO {
         IF itemail(e) THEN {
-            dynamicEML(itemail(e));
-            WRITE emlFileExport(itemail(e)) TO archPath() + '/' + internalID(itemail(e));
+            LOCAL outputPath = STRING ();
+            outputPath() <- archPath() + '/' + internalID(itemail(e)) + '.eml';
+            fileExists(outputPath());
+            IF NOT fileExists() THEN {
+                dynamicEML(itemail(e));
+                WRITE emlFileExport(itemail(e)) TO archPath() + '/' + internalID(itemail(e));
+            }
         }
     }
 } TOOLBAR;
@@ -225,12 +245,12 @@ pushToLowerCase 'Push to lower case' (Key k) {
 }
 FORM key 'Edit Keyword'
     OBJECTS k = Key PANEL 
-    PROPERTIES (k) word ON CHANGE pushToLowerCase(k), isRegister
+    PROPERTIES (k) word ON CHANGE pushToLowerCase(k), isRegister, isWhole
     EDIT Key OBJECT k
 ;
 
 DESIGN key {
-    size = (400,100);
+    size = (400,130);
     NEW pane FIRST {
         type = CONTAINERV;
         alignment = STRETCH;
@@ -240,6 +260,7 @@ DESIGN key {
             alignment = STRETCH; panelCaptionVertical = TRUE; 
         }
         MOVE PROPERTY (isRegister(k));
+        MOVE PROPERTY (isWhole(k));
     }
 }
 
@@ -274,7 +295,7 @@ FORM search 'Install Search'
     FILTERS s != sec
     
     OBJECTS k = Key
-    PROPERTIES (k) ON CHANGE editKey(k) BACKGROUND highlight(k) word, updated, start, apply, found
+    PROPERTIES (k) ON CHANGE editKey(k) BACKGROUND highlight(k) word, isRegister, isWhole, updated, start, apply, found
     PROPERTIES TOOLBAR addKey(s) DRAW k, DELETE(k) NEWSESSION 
     FILTERS search(k) == s
 ;
@@ -322,7 +343,7 @@ FORM searches 'Search'
     FILTERS s != sec
     
     OBJECTS k = Key
-    PROPERTIES (k) BACKGROUND highlight(k) word ON CHANGE editKey(k), found
+    PROPERTIES (k) BACKGROUND highlight(k) word ON CHANGE editKey(k), isRegister, isWhole, found
     PROPERTIES TOOLBAR addKey(s) DRAW k, DELETE(k) NEWSESSION 
     FILTERS search(k) == s
     
