@@ -25,6 +25,7 @@ TABLE keymail(Key,Email);
 search 'Search' = DATA Search(Key);
 
 word 'Keyword' = DATA STRING (Key);
+isRegister 'Case Sensitive' = DATA BOOLEAN (Key);
 updated 'Keyword' = DATA DATETIME (Key);
 start 'Start' = DATA DATETIME (Key);
 apply 'Applied' = DATA DATETIME (Key);
@@ -39,6 +40,11 @@ isLowerSubstring = FORMULA NULL BOOLEAN PG 'CASE WHEN position($2 in lower($1)) 
 // If pattern already found in the Subject field, then skip the message parsing
 matchKey 'Match Keyword' (Key k, Email e) = 
     OVERRIDE isLowerSubstring(message(e),word(k)), isLowerSubstring(subject(e),word(k));
+
+// Case Sensitive Search
+isRegisterSubstring = FORMULA NULL BOOLEAN PG 'CASE WHEN position($2 in $1) > 0 THEN 1 ELSE NULL END';
+matchRegisterKey 'Match Keyword Case Sensitive' (Key k, Email e) = 
+    OVERRIDE isRegisterSubstring(message(e),word(k)), isRegisterSubstring(subject(e),word(k));
 
 // Complex criteria
 in 'In' = DATA BOOLEAN (Search, Search);
@@ -89,13 +95,17 @@ markAllMatches 'Mark All matches to install Search' (Key k) {
         APPLY;
     }
     NEWSESSION {
-        in(k, Email e) <- TRUE WHERE matchKey(k,e);
+        IF isRegister(k) THEN {
+            in(k, Email e) <- TRUE WHERE matchRegisterKey(k,e);
+        } ELSE {
+            in(k, Email e) <- TRUE WHERE matchKey(k,e);
+        }
         apply(k) <- currentDateTime();
         APPLY;
     }
     NEWSESSION {
         // Controlled materialization
-        found(k) <- foundCalc(k);
+        found(k) <- OVERRIDE foundCalc(k), 0;
         apply(k) <- currentDateTime();
         APPLY;
     }
@@ -111,7 +121,7 @@ markAllMatches 'Mark All matches to install Search' (Search s) {
     }
     NEWSESSION {
         // Controlled materialization
-        found(s) <- foundCalc(s);
+        found(s) <- OVERRIDE foundCalc(s), 0;
         apply(s) <- currentDateTime();
         status(s) <- NULL;
         APPLY;
@@ -136,7 +146,7 @@ markNextSearch 'Mark Next Search' () {
         APPLY; 
     }
     
-    printToLog('Start apply of Search pattern: ' + condition(nextSearch()));
+    printToLog('Start apply of Search pattern: ' + conditionSearch(nextSearch()));
     
     TRY {
         markAllMatches(nextSearch());
@@ -145,7 +155,7 @@ markNextSearch 'Mark Next Search' () {
         printToLog('Search pattern ended with exception: ' + messageCaughtException());
     }
     
-    printToLog('Stop apply of Search pattern: ' + condition(nextSearch()));
+    printToLog('Stop apply of Search pattern: ' + conditionSearch(nextSearch()));
     isBlocked() <- NULL;
     APPLY;
 } TOOLBAR;
@@ -159,24 +169,30 @@ matchSearch 'Match Search' (Search s, Email e) =
     IF isWithin(s) THEN matchKeysWithin(s,e) ELSE matchKeys(s,e);
 amount 'Results found' (Search s) = GROUP SUM 1 IF matchSearch(s, Email e) > 0 CHARWIDTH 7;
 
-WHEN SETCHANGED (word(Key k)) DO {
+WHEN SETCHANGED (word(Key k)) OR SETDROPPED (isRegister(k)) OR SETCHANGED (search(k)) DO {
     updated(k) <- currentDateTime();
     datetime(search(k)) <- updated(k);
     user(search(k)) <- currentUser();
     status(search(k)) <- TRUE;
 }
 
-WHEN SETCHANGED (search(Key k)) DO {
-    datetime(search(k)) <- currentDateTime();
-    user(search(k)) <- currentUser();
-    status(search(k)) <- TRUE;
+WHEN SETDROPPED (isRegister(Key k)) DO {
+    IF NOT isRegister(k) THEN {
+        word(k) <- lower(word(k));
+    }
 }
+
+//WHEN SETCHANGED (search(Key k)) DO {
+//    datetime(search(k)) <- currentDateTime();
+//    user(search(k)) <- currentUser();
+//    status(search(k)) <- TRUE;
+//}
 
 WHEN SET (in(Search s, Search sec)) DO {
     included(s, sec) <- currentDateTime();
 }
 
-exportZip 'Export selected Search results into ZIP archive' (Search s) {
+exportZip 'Export selected into ZIP archive' (Search s) {
     zipping(STRING[100] eml) <- NULL;
     FOR select(s, Email e) DO {
         IF itemail(e) THEN {        
@@ -188,27 +204,42 @@ exportZip 'Export selected Search results into ZIP archive' (Search s) {
     WRITE CLIENT DIALOG zipped() TO 'EMLselected_Search ' + condition(s);
 } TOOLBAR;
 
+exportEML 'Export selected into EML files' (Search s) {
+    FOR select(s, Email e) DO {
+        IF itemail(e) THEN {
+            dynamicEML(itemail(e));
+            WRITE emlFileExport(itemail(e)) TO archPath() + '/' + internalID(itemail(e));
+        }
+    }
+} TOOLBAR;
+
 // Editing Form
 pushToLowerCase 'Push to lower case' (Key k) { 
-    INPUT s = ISTRING DO {
-        word(k) <- ISTRING (lower(s));
+    INPUT s = STRING DO {
+        IF isRegister(k) THEN {
+            word(k) <- s;
+        } ELSE {
+            word(k) <- STRING (lower(s));
+        }
     }
 }
 FORM key 'Edit Keyword'
     OBJECTS k = Key PANEL 
-    PROPERTIES (k) ON CHANGE pushToLowerCase(k) word
+    PROPERTIES (k) word ON CHANGE pushToLowerCase(k), isRegister
     EDIT Key OBJECT k
 ;
 
 DESIGN key {
-    size = (400,80);
+    size = (400,100);
     NEW pane FIRST {
+        type = CONTAINERV;
         alignment = STRETCH;
         fill = 1;
         MOVE PROPERTY (word(k)) { 
             caption = 'Letters or numbers, avoid spaces, case insensitive';
             alignment = STRETCH; panelCaptionVertical = TRUE; 
         }
+        MOVE PROPERTY (isRegister(k));
     }
 }
 
@@ -235,7 +266,7 @@ FORM search 'Install Search'
     OBJECTS s = Search
     PROPERTIES (s) READONLY BACKGROUND highlight(s) datetime, isWithin, start, apply, found
     PROPERTIES (s) BACKGROUND RGB (255,255,0) condition
-    PROPERTIES (s) NEW, DELETE, exportZip
+    PROPERTIES (s) NEW, DELETE, exportZip, exportEML
     
     OBJECTS sec = Search
     PROPERTIES in(s, sec)
@@ -251,6 +282,7 @@ FORM search 'Install Search'
 DESIGN search {
     TOOLBAR {
         MOVE PROPERTY (exportZip(s));
+        MOVE PROPERTY (exportEML(s));
     }
     NEW pane FIRST {
         type = CONTAINERV;
@@ -282,7 +314,7 @@ FORM searches 'Search'
     OBJECTS s = Search
     PROPERTIES (s) READONLY BACKGROUND highlight(s) datetime, isWithin, found
     PROPERTIES (s) PANEL condition BACKGROUND RGB (255,255,0), markAllMatches
-    PROPERTIES (s) NEW, DELETE, exportZip
+    PROPERTIES (s) NEW, DELETE, exportZip, exportEML
     
     OBJECTS sec = Search
     PROPERTIES in(s, sec)
@@ -309,6 +341,7 @@ FORM searches 'Search'
 DESIGN searches {
     TOOLBAR {
         MOVE PROPERTY (exportZip(s));
+        MOVE PROPERTY (exportEML(s));
     }
     NEW pane FIRST {
         type = CONTAINERV;
